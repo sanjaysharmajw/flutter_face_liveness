@@ -1,9 +1,11 @@
+import 'dart:math';
+
 /// Manages per-session metadata for audit trails and replay-attack prevention.
 class SessionManager {
   SessionManager() : _sessionId = _generateId();
 
   String _sessionId;
-  final int _createdAtMs = DateTime.now().millisecondsSinceEpoch;
+  int _createdAtMs = DateTime.now().millisecondsSinceEpoch;
   int _frameCount = 0;
   bool _isActive = true;
 
@@ -25,13 +27,20 @@ class SessionManager {
 
   void reset() {
     _sessionId = _generateId();
+    _createdAtMs = DateTime.now().millisecondsSinceEpoch;
     _frameCount = 0;
     _isActive = true;
   }
 
+  // Format: LV-{timestamp_hex}-{8 random hex chars}
+  // e.g.   LV-018F3A2B4C1D-A3F29E01
+  // Timestamp part: milliseconds since epoch (unique per ms)
+  // Random part:    cryptographically secure 32-bit value (unique within same ms)
   static String _generateId() {
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    final rand = (ts ^ (ts >> 16)) & 0xFFFFFF;
-    return 'LV-${ts.toRadixString(16).toUpperCase()}-${rand.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+    final ts   = DateTime.now().millisecondsSinceEpoch;
+    final rand = Random.secure().nextInt(0xFFFFFFFF);
+    final tsPart   = ts.toRadixString(16).toUpperCase().padLeft(12, '0');
+    final randPart = rand.toRadixString(16).toUpperCase().padLeft(8, '0');
+    return 'LV-$tsPart-$randPart';
   }
 }
