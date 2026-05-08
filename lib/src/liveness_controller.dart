@@ -158,14 +158,16 @@ class LivenessController extends ChangeNotifier {
     if (result.isSuccess && _faceIdentity != null && _currentFace != null) {
       final raw = _lastRawFrame;
       if (raw != null) {
-        final faceId = await _faceIdentity!.identifyFromFrame(
+        final match = await _faceIdentity!.identifyFromFrame(
           imageBytes:        raw.imageBytes,
           imageWidth:        raw.imageWidth,
           imageHeight:       raw.imageHeight,
           faceBoundingBox:   _currentFace!.boundingBox,
           sensorOrientation: raw.sensorOrientation,
         );
-        if (faceId != null) finalResult = result.withFaceId(faceId);
+        if (match != null) {
+          finalResult = result.withFaceId(match.faceId, isNew: match.isNew);
+        }
       }
     }
 

@@ -56,11 +56,11 @@ class FaceIdentityService {
 
   /// Identify the face visible in the last verified frame.
   ///
-  /// Returns a stable [faceId] string:
-  ///  - Same person → same ID (across all sessions on the same device).
-  ///  - Different person → new unique ID.
+  /// Returns `(faceId, isNew)`:
+  ///  - `isNew == false` → same person recognised, same ID returned.
+  ///  - `isNew == true`  → new face; a fresh ID was registered.
   ///  - Returns `null` if preprocessing or inference fails.
-  Future<String?> identifyFromFrame({
+  Future<({String faceId, bool isNew})?> identifyFromFrame({
     required Uint8List imageBytes,
     required int imageWidth,
     required int imageHeight,
@@ -103,7 +103,7 @@ class FaceIdentityService {
 
   // ── Matching / registration ───────────────────────────────────────────────
 
-  Future<String> _matchOrRegister(List<double> embedding) async {
+  Future<({String faceId, bool isNew})> _matchOrRegister(List<double> embedding) async {
     String? bestId;
     double  bestSim = -1.0;
 
@@ -117,15 +117,13 @@ class FaceIdentityService {
 
     if (bestId != null && bestSim >= similarityThreshold) {
       debugPrint('[FaceIdentityService] Matched $bestId (sim=${bestSim.toStringAsFixed(3)})');
-      // Update stored embedding toward the new observation so the face
-      // template gradually adapts to lighting / pose changes.
       _knownFaces[bestId] = _blendEmbeddings(
         _knownFaces[bestId]!,
         embedding,
         _embeddingUpdateRate,
       );
       await _flushToPrefs();
-      return bestId;
+      return (faceId: bestId, isNew: false);
     }
 
     // New face — register and persist
@@ -133,7 +131,7 @@ class FaceIdentityService {
     _knownFaces[faceId] = embedding;
     await _flushToPrefs();
     debugPrint('[FaceIdentityService] New face registered → $faceId');
-    return faceId;
+    return (faceId: faceId, isNew: true);
   }
 
   /// Weighted blend: `(1-rate)*stored + rate*newEmbedding`, then L2-renormalise.

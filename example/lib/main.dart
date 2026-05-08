@@ -540,7 +540,10 @@ class _StatsCard extends StatelessWidget {
           ),
           if (result.faceId != null) ...[
             _divider(),
-            _CopyableFaceIdTile(faceId: result.faceId!),
+            _FaceIdMatchCard(
+              faceId:   result.faceId!,
+              isNew:    result.isFaceIdNew ?? true,
+            ),
           ],
           if (result.sessionId != null) ...[
             _divider(),
@@ -569,58 +572,121 @@ class _StatsCard extends StatelessWidget {
       color: Color(0xFFE2E8F0), height: 1, indent: 20, endIndent: 20);
 }
 
-class _CopyableFaceIdTile extends StatelessWidget {
-  const _CopyableFaceIdTile({required this.faceId});
+class _FaceIdMatchCard extends StatelessWidget {
+  const _FaceIdMatchCard({required this.faceId, required this.isNew});
   final String faceId;
+  final bool   isNew;
 
   @override
   Widget build(BuildContext context) {
+    final accent = isNew ? _primary : _success;
+    final label  = isNew ? 'New Face Registered' : 'Face Recognised — Welcome Back!';
+    final sub    = isNew
+        ? 'This is your unique Face ID. It will be returned every time you scan the same face.'
+        : 'This face was already stored on this device. The same ID was matched.';
+    final icon   = isNew ? Icons.person_add_alt_1_rounded : Icons.how_to_reg_rounded;
+
     return GestureDetector(
       onTap: () {
         Clipboard.setData(ClipboardData(text: faceId));
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Face ID copied to clipboard'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text('Face ID copied: $faceId'),
+            duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
-            backgroundColor: _success,
+            backgroundColor: accent,
           ),
         );
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        child: Row(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Status banner
             Container(
-              width: 34,
-              height: 34,
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: _success.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(9),
+                color: accent.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: accent.withOpacity(0.25)),
               ),
-              child: const Icon(Icons.face_rounded, color: _success, size: 17),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  const Text('Face ID  (tap to copy)',
-                      style: TextStyle(color: _textSecondary, fontSize: 11)),
-                  const SizedBox(height: 2),
-                  Text(
-                    faceId,
-                    style: const TextStyle(
-                      color: _textPrimary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: accent.withOpacity(0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, color: accent, size: 16),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          sub,
+                          style: TextStyle(
+                            color: accent.withOpacity(0.75),
+                            fontSize: 10,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.copy_rounded, color: _textSecondary, size: 14),
+            const SizedBox(height: 10),
+            // Face ID row
+            Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: accent.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.fingerprint_rounded, color: accent, size: 16),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Face ID  (tap to copy)',
+                          style: TextStyle(color: _textSecondary, fontSize: 10)),
+                      const SizedBox(height: 2),
+                      Text(
+                        faceId,
+                        style: TextStyle(
+                          color: _textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'monospace',
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.copy_rounded, color: _textSecondary.withOpacity(0.5), size: 13),
+              ],
+            ),
           ],
         ),
       ),

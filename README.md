@@ -18,6 +18,7 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 - [LivenessConfig Reference](#livenessconfig-reference)
 - [Liveness Actions](#liveness-actions)
 - [LivenessResult Fields](#livenessresult-fields)
+- [LivenessController API](#livenesscontroller-api)
 - [TFLite Integration](#tflite-integration-optional)
 - [Architecture](#architecture)
 - [Performance](#performance)
@@ -33,14 +34,15 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 |----------|---------|
 | **Liveness** | 7 challenge actions — blink, turn left/right, look up/down, smile, open mouth |
 | **Face ID** | **Same face → always same ID**, across sessions, restarts, and days. Powered by FaceNet TFLite (auto-downloaded, one-time ~23 MB) |
+| **New/Returning** | `isFaceIdNew` flag tells you instantly if it's a first-time or returning face |
 | **Anti-Spoof** | 7-signal composite engine — eye variance, geometry, pose, micro-motion, quality, tracking |
-| **Frame Quality** | Brightness (platform-correct BT.601 luminance), blur, overexposure — with debounce |
+| **Frame Quality** | BT.601 platform-correct brightness (Android NV21 + iOS BGRA8888), blur, overexposure — with 6-frame debounce |
 | **Replay Guard** | FNV-1a frame hashing detects looped / static-image attacks |
 | **Session Security** | Cryptographically unique session IDs via `Random.secure()` |
 | **Action Randomisation** | Fisher-Yates shuffle prevents predictable replay attacks |
-| **Isolate ML** | YUV→NV21 conversion + quality analysis offloaded to background isolate |
+| **Isolate ML** | YUV→NV21 conversion, quality analysis, and face embedding — all in background isolates |
 | **TFLite Plug-in** | Drop in your own deepfake-detection model without changing package APIs |
-| **Theming** | Dark / light mode via `LivenessConfig.themeMode` |
+| **Theming** | Dark / light / system mode via `LivenessConfig.themeMode` |
 | **Debug Overlay** | Real-time Euler angles, eye/smile probabilities, brightness, blur on screen |
 
 ---
@@ -55,12 +57,13 @@ FlutterFaceLiveness(
   actions: [LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRight],
   config: LivenessConfig(
     enableAntiSpoof: true,
-    enableFaceId: true,          // assign a stable FID to this user
+    enableFaceId: true,
     randomizeActions: true,
   ),
   onSuccess: (result) {
-    final faceId    = result.faceId;       // "FID-3A9F2B1C4E8D…"
-    final sessionId = result.sessionId;    // "LV-018F3A2B9C4E-D7E31F08"
+    final faceId    = result.faceId;        // "FID-3A9F2B1C4E8D…"
+    final isNew     = result.isFaceIdNew;   // true = first time, false = returning
+    final sessionId = result.sessionId;     // "LV-018F3A2B9C4E-D7E31F08"
     final score     = result.confidenceScore;
     // Send faceId + sessionId to your backend for audit trail
   },
@@ -72,61 +75,82 @@ FlutterFaceLiveness(
 Transaction authorisation, step-up authentication, and high-risk operation confirmation. Face ID ensures the authorising person is the account holder across every session.
 
 ```dart
-// On every login / transaction:
-config: LivenessConfig(
-  enableFaceId: true,
-  faceIdSimilarityThreshold: 0.72,  // stricter for banking
-  enableAntiSpoof: true,
-  sessionTimeoutMs: 30000,           // 30-second window
-),
-onSuccess: (result) {
-  if (result.faceId == storedFaceId) {
-    authoriseTransaction();
-  } else {
-    flagForReview();   // different face from enrolled user
-  }
-}
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.smile],
+  config: LivenessConfig(
+    enableFaceId: true,
+    faceIdSimilarityThreshold: 0.72,  // stricter for banking
+    enableAntiSpoof: true,
+    sessionTimeoutMs: 30000,           // 30-second window
+  ),
+  onSuccess: (result) {
+    if (result.isFaceIdNew == false && result.faceId == storedFaceId) {
+      authoriseTransaction();   // returning, known face
+    } else {
+      flagForReview();          // new or unexpected face
+    }
+  },
+  onFailed: (reason) => showError(reason),
+)
 ```
 
 ### Attendance Systems
 Employee / student attendance where the same person must be recognised across multiple daily check-ins.
 
 ```dart
-// Enrolment (first check-in): faceId is new → store in database
-// Daily check-in: same faceId returned → mark present
-config: LivenessConfig(
-  enableFaceId: true,
-  enableAntiSpoof: true,
+// Enrolment (first check-in): isFaceIdNew == true → store faceId in database
+// Daily check-in:             isFaceIdNew == false → mark present
+FlutterFaceLiveness(
   actions: [LivenessAction.blink],   // quick single-action check
-),
+  config: LivenessConfig(
+    enableFaceId: true,
+    enableAntiSpoof: true,
+  ),
+  onSuccess: (result) {
+    if (result.isFaceIdNew == true) {
+      db.enrolEmployee(result.faceId!);
+    } else {
+      db.markAttendance(result.faceId!, DateTime.now());
+    }
+  },
+  onFailed: (reason) => showError(reason),
+)
 ```
 
 ### Authentication / Biometric Login
 Replace or augment PIN/password with a liveness-verified face. The persistent Face ID acts as the biometric credential stored on-device.
 
 ```dart
-config: LivenessConfig(
-  enableFaceId: true,
-  faceIdSimilarityThreshold: 0.70,
-  enableBrightnessCheck: true,
-),
-onSuccess: (result) {
-  if (result.faceId == prefs.getString('enrolled_face_id')) {
-    unlockApp();
-  } else {
-    showError('Face not recognised — please contact support');
-  }
-}
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft],
+  config: LivenessConfig(
+    enableFaceId: true,
+    faceIdSimilarityThreshold: 0.70,
+    enableBrightnessCheck: true,
+  ),
+  onSuccess: (result) {
+    final enrolled = prefs.getString('enrolled_face_id');
+    if (result.isFaceIdNew == false && result.faceId == enrolled) {
+      unlockApp();
+    } else if (enrolled == null && result.isFaceIdNew == true) {
+      prefs.setString('enrolled_face_id', result.faceId!);
+      showEnrolmentSuccess();
+    } else {
+      showError('Face not recognised — please contact support');
+    }
+  },
+  onFailed: (reason) => showError(reason),
+)
 ```
 
 ### Enterprise Security
 Multi-factor authentication, access control, and audit logging for enterprise applications.
 
 ```dart
-// Log who performed each sensitive action
 onSuccess: (result) {
   auditLog.record(
-    userId:    result.faceId,
+    faceId:    result.faceId,
+    isNewFace: result.isFaceIdNew,
     sessionId: result.sessionId,
     timestamp: DateTime.now(),
     actions:   result.completedActions.map((a) => a.name).toList(),
@@ -152,6 +176,8 @@ dependencies:
 
 ```xml
 <uses-permission android:name="android.permission.CAMERA" />
+<!-- Required only when enableFaceId: true -->
+<uses-permission android:name="android.permission.INTERNET" />
 ```
 
 **iOS** — `ios/Runner/Info.plist`
@@ -178,17 +204,24 @@ defaultConfig {
 }
 ```
 
-### 4. Internet permission (only if using Face ID)
+### 4. Fix tflite_flutter for Dart 3.4+
 
-Face ID downloads the FaceNet model (~23 MB) on first launch. Add internet permission:
+`tflite_flutter 0.10.4` (pub.dev) uses `UnmodifiableUint8ListView` which was removed in Dart 3.4. Add a `dependency_overrides` block to pull the fixed version from git:
 
-**Android** — `AndroidManifest.xml`:
-
-```xml
-<uses-permission android:name="android.permission.INTERNET" />
+```yaml
+# pubspec.yaml
+dependency_overrides:
+  tflite_flutter:
+    git:
+      url: https://github.com/tensorflow/flutter-tflite.git
+      ref: main
 ```
 
-The model is cached permanently after the first download — no subsequent network calls.
+This resolves to `tflite_flutter 0.12.1` automatically. No other changes required.
+
+### 5. Internet permission note (Face ID only)
+
+The FaceNet model (~23 MB) is downloaded **once** on first launch with `enableFaceId: true` and cached permanently in the app's documents directory. All subsequent launches use the local cache — no network required.
 
 ---
 
@@ -238,66 +271,76 @@ class VerificationPage extends StatelessWidget {
 > time a completely unknown face is seen.
 >
 > ```
-> User scans face on Day 1  →  FID-3A9F2B1C4E8D7F62
-> User scans face on Day 7  →  FID-3A9F2B1C4E8D7F62   ← same ID
-> User scans face on Day 30 →  FID-3A9F2B1C4E8D7F62   ← same ID
-> Different person scans    →  FID-A817C3F0B24E9D51   ← new ID
+> User scans face on Day 1  →  FID-3A9F2B1C4E8D7F62   isFaceIdNew: true
+> User scans face on Day 7  →  FID-3A9F2B1C4E8D7F62   isFaceIdNew: false  ← same ID
+> User scans face on Day 30 →  FID-3A9F2B1C4E8D7F62   isFaceIdNew: false  ← same ID
+> Different person scans    →  FID-A817C3F0B24E9D51   isFaceIdNew: true   ← new ID
 > ```
 
 ### How it works
 
-1. **First detection** — FaceNet extracts a 128-dimensional embedding from the verified face crop. A unique ID is generated (`FID-3A9F2B1C4E8D…`) and persisted in `SharedPreferences`.
-2. **Every subsequent detection** — The new embedding is compared against all stored embeddings using cosine similarity. If the best match scores ≥ `faceIdSimilarityThreshold` (default `0.65`), **the same `FID-XXXX` is returned — no new ID is ever created for that person**.
-3. **Adapts over time** — On every confirmed match the stored template blends toward the new observation (`75% old + 25% new`, re-normalised). This means the Face ID stays accurate even as lighting, hairstyle, or camera angle changes.
-4. **Survives everything** — Face IDs persist across app restarts, app updates, phone restarts, and re-installs (data lives in `SharedPreferences`; only cleared explicitly via `clearFaceIdentities()`).
+1. **First detection** — FaceNet extracts a 128-dimensional embedding from the verified face crop. A unique ID is generated (`FID-3A9F2B1C4E8D…`) and persisted in `SharedPreferences`. `isFaceIdNew` is `true`.
+2. **Every subsequent detection** — The new embedding is compared against all stored embeddings using cosine similarity. If the best match scores ≥ `faceIdSimilarityThreshold` (default `0.65`), **the same `FID-XXXX` is returned**. `isFaceIdNew` is `false`.
+3. **Adapts over time** — On every confirmed match the stored template is blended: `stored = 0.75 × stored + 0.25 × new` (then re-normalised to unit length). The Face ID stays accurate even as lighting, hairstyle, or camera angle changes session to session.
+4. **Survives everything** — Face IDs persist across app restarts, app updates, phone restarts, and re-installs (stored in `SharedPreferences`; only cleared via `clearFaceIdentities()`).
 
 ### Enable it
 
 ```dart
-config: LivenessConfig(
-  enableFaceId: true,
-  // optional — raise for stricter, lower for more lenient matching
-  faceIdSimilarityThreshold: 0.65,
-),
-onSuccess: (result) {
-  final faceId = result.faceId;   // e.g. "FID-3A9F2B1C4E8D7F62A091"
-  print('Face ID: $faceId');
-},
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft],
+  config: LivenessConfig(
+    enableFaceId: true,
+    faceIdSimilarityThreshold: 0.65,  // default — good for most apps
+  ),
+  onSuccess: (result) {
+    final faceId = result.faceId!;       // "FID-3A9F2B1C4E8D7F62A091"
+    final isNew  = result.isFaceIdNew!;  // true = registered, false = matched
+
+    if (isNew) {
+      print('New face registered: $faceId');
+    } else {
+      print('Welcome back! Recognised as: $faceId');
+    }
+  },
+  onFailed: (reason) => print('Failed: $reason'),
+)
 ```
 
 ### First-run download progress
 
-On first launch with `enableFaceId: true`, the FaceNet model (~23 MB) is downloaded automatically. The built-in loading screen shows download progress. No code required.
+On first launch with `enableFaceId: true`, the built-in loading screen shows the download percentage automatically. No code required.
 
-To show custom progress UI, listen to the controller:
+To observe progress from outside the widget:
 
 ```dart
-// Using LivenessController directly (advanced use)
 final controller = LivenessController(
   actions: [...],
   config: LivenessConfig(enableFaceId: true),
   onSuccess: ...,
-  onFailed: ...,
+  onFailed:  ...,
 );
-// controller.faceIdModelDownloadProgress — double? (0.0–1.0 during download, null otherwise)
+
+// Rebuild when this changes (it's a ChangeNotifier getter)
+// double? faceIdModelDownloadProgress  →  0.0–1.0 during download, null otherwise
 ```
 
 ### Managing stored faces
 
 ```dart
-// Access the controller
-final controller = LivenessController(...);
+// Via LivenessController (recommended)
+await controller.clearFaceIdentities();   // delete all on logout
 
-// Delete all stored faces (e.g. on logout)
-await controller.clearFaceIdentities();
-
-// Or use FaceIdentityService directly:
-final service = FaceIdentityService();
-await service.initialize();
+// Via FaceIdentityService directly (advanced)
+final service = FaceIdentityService(similarityThreshold: 0.65);
+await service.initialize(
+  onModelDownloadProgress: (p) => print('${(p * 100).toInt()}%'),
+);
 
 List<String> ids = service.registeredFaceIds;  // all IDs on this device
-await service.removeFace('FID-3A9F2B…');        // remove one face
+await service.removeFace('FID-3A9F2B…');        // remove one specific face
 await service.clearAllFaces();                  // remove all faces
+service.dispose();
 ```
 
 ### Cosine similarity thresholds guide
@@ -316,42 +359,42 @@ await service.clearAllFaces();                  // remove all faces
 ```dart
 LivenessConfig({
   // Session
-  int sessionTimeoutMs = 60000,
-  bool randomizeActions = true,
+  int    sessionTimeoutMs  = 60000,
+  bool   randomizeActions  = true,
 
   // Camera
   ResolutionPreset cameraResolution = ResolutionPreset.high,
-  int targetFps = 20,
+  int    targetFps         = 20,
 
   // Anti-spoof
-  bool enableAntiSpoof = true,
-  double antiSpoofThreshold = 0.45,
+  bool   enableAntiSpoof      = true,
+  double antiSpoofThreshold   = 0.45,
 
-  // Frame quality
-  bool enableBrightnessCheck = true,
-  double brightnessMin = 0.12,
-  double brightnessMax = 0.92,
-  bool enableBlurDetection = true,
-  double blurThreshold = 80.0,
-  bool enableDuplicateFrameDetection = true,
-  int duplicateFrameWindowSize = 8,
+  // Frame quality  (brightness debounce: 6 consecutive bad frames required)
+  bool   enableBrightnessCheck = true,
+  double brightnessMin         = 0.12,   // below = genuinely dark room
+  double brightnessMax         = 0.92,   // above = direct sunlight / overexposed
+  bool   enableBlurDetection   = true,
+  double blurThreshold         = 80.0,
+  bool   enableDuplicateFrameDetection = true,
+  int    duplicateFrameWindowSize      = 8,
 
   // Face geometry
-  double faceTooFarRatio = 0.015,
+  double faceTooFarRatio   = 0.015,
   double faceTooCloseRatio = 0.70,
 
   // Face Identity
-  bool enableFaceId = false,
-  double faceIdSimilarityThreshold = 0.65,
+  bool   enableFaceId                = false,
+  double faceIdSimilarityThreshold   = 0.65,
 
   // TFLite (optional custom model)
-  bool enableTFLite = false,
-  String? tfliteModelPath,
-  int tfliteInputSize = 128,
+  bool    enableTFLite    = false,
+  String? tfliteModelPath = null,
+  int     tfliteInputSize = 128,
 
   // UI
-  ThemeMode themeMode = ThemeMode.dark,
-  bool showDebugOverlay = false,
+  ThemeMode themeMode       = ThemeMode.dark,
+  bool      showDebugOverlay = false,
 })
 ```
 
@@ -359,28 +402,28 @@ LivenessConfig({
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `sessionTimeoutMs` | `int` | `60000` | Auto-fail after this many ms. Set lower for quick checks. |
-| `randomizeActions` | `bool` | `true` | Shuffle action order each session (prevents replay attacks) |
-| `cameraResolution` | `ResolutionPreset` | `high` | Camera resolution. `medium` reduces CPU on low-end devices |
+| `sessionTimeoutMs` | `int` | `60000` | Auto-fail after this many ms |
+| `randomizeActions` | `bool` | `true` | Fisher-Yates shuffle per session — prevents replay attacks |
+| `cameraResolution` | `ResolutionPreset` | `high` | `medium` reduces CPU on low-end devices |
 | `targetFps` | `int` | `20` | Frame processing rate (1–30 fps) |
-| `enableAntiSpoof` | `bool` | `true` | 7-signal composite anti-spoof heuristic check |
+| `enableAntiSpoof` | `bool` | `true` | 7-signal composite anti-spoof heuristic |
 | `antiSpoofThreshold` | `double` | `0.45` | Minimum composite score to pass (0.0–1.0) |
 | `enableBrightnessCheck` | `bool` | `true` | Block frames that are too dark or overexposed |
-| `brightnessMin` | `double` | `0.12` | Minimum Y-luminance ratio. Below this = genuinely dark room |
-| `brightnessMax` | `double` | `0.92` | Maximum Y-luminance ratio. Above this = overexposed / direct sun |
+| `brightnessMin` | `double` | `0.12` | Y-luminance below this = genuinely dark room. Uses BT.601 on iOS (BGRA) and Y-plane on Android (NV21). Triggers only after **6 consecutive** dark frames to absorb camera auto-exposure settling |
+| `brightnessMax` | `double` | `0.92` | Y-luminance above this = overexposed / direct sun. Same 6-frame debounce applies |
 | `enableBlurDetection` | `bool` | `true` | Block blurry frames |
 | `blurThreshold` | `double` | `80.0` | Y-plane variance; below this = blurry |
-| `enableDuplicateFrameDetection` | `bool` | `true` | Hash-based looped-video / static-image detection |
-| `duplicateFrameWindowSize` | `int` | `8` | Sliding window size for duplicate streak detection |
+| `enableDuplicateFrameDetection` | `bool` | `true` | FNV-1a hash sliding-window replay detection |
+| `duplicateFrameWindowSize` | `int` | `8` | Sliding window size for duplicate streak |
 | `faceTooFarRatio` | `double` | `0.015` | Face bounding-box area ratio below which = "too far" |
 | `faceTooCloseRatio` | `double` | `0.70` | Face bounding-box area ratio above which = "too close" |
-| `enableFaceId` | `bool` | `false` | Enable persistent face identity. Model auto-downloaded on first run |
-| `faceIdSimilarityThreshold` | `double` | `0.65` | Cosine similarity cutoff for same-face matching (0.0–1.0) |
-| `enableTFLite` | `bool` | `false` | Enable custom TFLite deepfake/PAD model inference |
-| `tfliteModelPath` | `String?` | `null` | Flutter asset path to `.tflite` model file |
+| `enableFaceId` | `bool` | `false` | Persistent face identity. FaceNet model auto-downloaded on first run |
+| `faceIdSimilarityThreshold` | `double` | `0.65` | Cosine similarity cutoff. Same face across lighting/angle typically scores 0.65–0.85 |
+| `enableTFLite` | `bool` | `false` | Custom TFLite deepfake / PAD model |
+| `tfliteModelPath` | `String?` | `null` | Flutter asset path to `.tflite` model |
 | `tfliteInputSize` | `int` | `128` | Model input size (square, px) |
-| `themeMode` | `ThemeMode` | `dark` | Widget theme. `ThemeMode.system` follows device theme |
-| `showDebugOverlay` | `bool` | `false` | Show Euler angles, eye/smile probabilities, brightness, blur |
+| `themeMode` | `ThemeMode` | `dark` | `ThemeMode.system` follows device theme |
+| `showDebugOverlay` | `bool` | `false` | Euler angles, eye/smile probabilities, brightness, blur |
 
 ---
 
@@ -394,23 +437,24 @@ LivenessConfig({
 | Look Up | `LivenessAction.lookUp` | Pitch angle > +15° held for ≥ 80 ms |
 | Look Down | `LivenessAction.lookDown` | Pitch angle < −15° held for ≥ 80 ms |
 | Smile | `LivenessAction.smile` | Smile probability > 0.80 |
-| Open Mouth | `LivenessAction.openMouth` | Face bounding-box height grows > 8% with smile probability < 0.30 |
+| Open Mouth | `LivenessAction.openMouth` | Bounding-box height grows > 8% with smile probability < 0.30 |
 
 ### Recommended action combinations
 
 ```dart
 // Quick check (low friction)
-[LivenessAction.blink]
+actions: [LivenessAction.blink]
 
 // Standard (recommended for most apps)
-[LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRight]
+actions: [LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRight]
 
 // High-security KYC
-[LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRight, LivenessAction.smile]
+actions: [LivenessAction.blink, LivenessAction.turnLeft,
+          LivenessAction.turnRight, LivenessAction.smile]
 
 // Full challenge
-[LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRight,
- LivenessAction.lookUp, LivenessAction.openMouth]
+actions: [LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRight,
+          LivenessAction.lookUp, LivenessAction.openMouth]
 ```
 
 ---
@@ -421,15 +465,26 @@ LivenessConfig({
 class LivenessResult {
   final bool   isSuccess;
   final List<LivenessAction> completedActions;
-  final double confidenceScore;    // 0.0–1.0 composite anti-spoof score
-  final bool   isRealHuman;        // true when anti-spoof passes
-  final bool   spoofDetected;      // true if heuristic anti-spoof triggered
-  final bool   deepfakeDetected;   // true if TFLite model triggered (when enabled)
-  final double? tfliteScore;       // raw TFLite model output (when enabled)
-  final String? failureReason;     // human-readable reason on failure
-  final int?   sessionDurationMs;  // total session time in milliseconds
-  final String? sessionId;         // e.g. "LV-018F3A2B9C4E-D7E31F08"
-  final String? faceId;            // e.g. "FID-3A9F2B1C4E8D7F62A091" (when enableFaceId: true)
+  final double confidenceScore;   // 0.0–1.0 composite anti-spoof score
+  final bool   isRealHuman;       // true when anti-spoof passes
+  final bool   spoofDetected;     // true if heuristic signals triggered
+  final bool   deepfakeDetected;  // true if TFLite model triggered (when enabled)
+  final double? tfliteScore;      // raw TFLite model output (when enabled)
+  final String? failureReason;    // human-readable reason on failure
+  final int?   sessionDurationMs; // total session time in ms
+
+  // Session ID format: "LV-{12-char-timestamp-hex}-{8-char-secure-random-hex}"
+  // e.g. "LV-018F3A2B9C4E-D7E31F08"  — generated via Random.secure()
+  final String? sessionId;
+
+  // Face ID format: "FID-{24 uppercase hex chars}"
+  // e.g. "FID-3A9F2B1C4E8D7F62A091B3C5"  — non-null only when enableFaceId: true
+  final String? faceId;
+
+  // true  → this face was seen for the FIRST TIME — new ID was created
+  // false → this face was RECOGNISED — existing ID returned
+  // null  → Face ID is disabled (enableFaceId: false)
+  final bool? isFaceIdNew;
 }
 ```
 
@@ -437,31 +492,97 @@ class LivenessResult {
 
 ```dart
 onSuccess: (LivenessResult result) {
-  // 1. Always check isSuccess
-  assert(result.isSuccess);
+  // 1. Confidence score
+  final pct = (result.confidenceScore * 100).toStringAsFixed(1);
+  print('Anti-spoof confidence: $pct%');
 
-  // 2. Confidence score
-  if (result.confidenceScore < 0.6) {
-    // Low confidence — show a re-attempt prompt
-  }
-
-  // 3. Face ID (only set when enableFaceId: true)
+  // 2. Face ID — new vs returning user
   if (result.faceId != null) {
-    final isReturningUser = myDatabase.contains(result.faceId!);
-    if (isReturningUser) {
-      loginUser(result.faceId!);
+    if (result.isFaceIdNew == true) {
+      // First time this face is seen on this device
+      print('New face registered: ${result.faceId}');
+      myBackend.registerUser(faceId: result.faceId!);
     } else {
-      registerUser(result.faceId!);
+      // Recognised — same ID as before
+      print('Welcome back: ${result.faceId}');
+      myBackend.loginUser(faceId: result.faceId!);
     }
   }
 
-  // 4. Session ID — send to backend for server-side audit
+  // 3. Session ID — send to backend for audit trail
   myBackend.logSession(
-    sessionId: result.sessionId!,
-    faceId:    result.faceId,
-    score:     result.confidenceScore,
+    sessionId:  result.sessionId!,
+    faceId:     result.faceId,
+    isNewFace:  result.isFaceIdNew,
+    score:      result.confidenceScore,
+    durationMs: result.sessionDurationMs,
+    actions:    result.completedActions.map((a) => a.name).toList(),
   );
 },
+```
+
+---
+
+## LivenessController API
+
+For advanced use cases where you need to drive liveness from code rather than using `FlutterFaceLiveness` widget directly:
+
+```dart
+final controller = LivenessController(
+  actions:   [LivenessAction.blink, LivenessAction.turnLeft],
+  config:    LivenessConfig(enableFaceId: true),
+  onSuccess: (result) { ... },
+  onFailed:  (reason) { ... },
+);
+
+await controller.initialize();
+```
+
+### Public getters
+
+| Getter | Type | Description |
+|--------|------|-------------|
+| `isInitialized` | `bool` | True after camera + models are ready |
+| `status` | `DetectionStatus` | Current detection state (see below) |
+| `currentAction` | `LivenessAction?` | The action the user must perform now |
+| `completedActions` | `List<LivenessAction>` | Actions already completed this session |
+| `remainingActions` | `List<LivenessAction>` | Actions still to complete |
+| `completedCount` | `int` | Number of completed actions |
+| `totalActions` | `int` | Total actions in this session |
+| `progress` | `double` | 0.0–1.0 completion progress |
+| `isComplete` | `bool` | True after all actions are done |
+| `sessionId` | `String?` | Current session ID |
+| `currentFace` | `FaceData?` | Most recent detected face data |
+| `lastQuality` | `FrameQuality?` | Most recent frame quality metrics |
+| `faceIdModelDownloadProgress` | `double?` | 0.0–1.0 during model download, `null` otherwise |
+| `error` | `String?` | Non-null if initialization failed |
+| `cameraController` | `CameraController?` | Underlying camera controller |
+
+### DetectionStatus values
+
+| Status | Meaning |
+|--------|---------|
+| `initializing` | Camera / models loading |
+| `noFace` | No face detected in frame |
+| `multipleFaces` | More than one face visible |
+| `faceTooFar` | Move closer to camera |
+| `faceTooClose` | Move further from camera |
+| `faceNotCentered` | Centre your face in the oval |
+| `lowLight` | Too dark — triggered after 6 consecutive dark frames |
+| `overExposed` | Too bright / direct light — same 6-frame debounce |
+| `blurry` | Camera out of focus |
+| `fakeDetected` | Anti-spoof or duplicate-frame check triggered |
+| `actionInProgress` | Performing a liveness challenge |
+| `completed` | All actions done — `onSuccess` will fire |
+| `failed` | Session timed out or manually failed |
+
+### Methods
+
+```dart
+await controller.initialize();            // start camera + load models
+await controller.reset();                 // restart session, keep camera running
+await controller.clearFaceIdentities();   // delete all stored face embeddings
+await controller.dispose();              // release all resources
 ```
 
 ---
@@ -520,33 +641,37 @@ FlutterFaceLiveness (Widget)
     └── LivenessController (ChangeNotifier)
             │
             ├── Camera Layer
-            │       ├── CameraService        — camera lifecycle, frame streaming, throttling
+            │       ├── CameraService        — camera lifecycle, frame streaming, targetFps throttling
             │       └── CameraValidator      — distance, centering, geometry checks
             │
             ├── ML Layer
-            │       ├── FaceDetectorService  — Google ML Kit face detection + RawFrameData capture
+            │       ├── FaceDetectorService  — Google ML Kit face detection
+            │       │       └── RawFrameData — platform-correct bytes (NV21/BGRA) for Face ID
             │       └── FrameProcessor       — compute() isolate
             │               ├── YUV → NV21 conversion (Android) / BGRA pass-through (iOS)
-            │               ├── BT.601 brightness (platform-correct)
+            │               ├── BT.601 brightness: (77R+150G+29B)>>8 on iOS BGRA,
+            │               │                      Y-plane average on Android NV21
             │               ├── Y-plane blur score (variance)
             │               └── FNV-1a frame hash
             │
             ├── Liveness Layer
-            │       ├── LivenessEngine       — action sequencing, session lifecycle, debounce
+            │       ├── LivenessEngine       — action sequencing, session lifecycle
+            │       │       └── 6-frame debounce for brightness/overexposure checks
             │       ├── BlinkDetector        — open→close→open eye state machine
             │       ├── HeadMovementDetector — Euler angle threshold + hold timer
-            │       └── SessionManager       — secure session ID + timeout
+            │       └── SessionManager       — Random.secure() session ID + timeout
             │
             ├── Security Layer
-            │       ├── AntiSpoofEngine      — 7-signal composite scoring (12-frame rolling window)
+            │       ├── AntiSpoofEngine      — 7-signal composite (12-frame rolling window)
             │       ├── FrameHasher          — FNV-1a sliding-window duplicate detection
-            │       └── TFLiteService        — optional custom deepfake model inference
+            │       └── TFLiteService        — optional custom deepfake model
             │
-            └── Face Identity Layer (optional)
+            └── Face Identity Layer (optional, enableFaceId: true)
                     ├── FaceIdentityService  — cosine matching + SharedPreferences persistence
-                    ├── FaceEmbeddingModel   — FaceNet TFLite interpreter (128-dim embeddings)
-                    ├── FacePreprocessor     — face crop + resize + normalise (compute isolate)
-                    └── FaceModelDownloader  — streaming HTTP download + cache validation
+                    │       └── Embedding blending: 0.75×stored + 0.25×new (re-normalised)
+                    ├── FaceEmbeddingModel   — FaceNet TFLite (128-dim L2-normalised embeddings)
+                    ├── FacePreprocessor     — face crop → 160×160 → [-1,1] normalise (isolate)
+                    └── FaceModelDownloader  — streaming HTTP, primary + fallback URL, cache validation
 ```
 
 ---
@@ -558,21 +683,26 @@ FlutterFaceLiveness (Widget)
 | Per-frame latency (mid-range Android) | 40–60 ms |
 | Per-frame latency (iPhone 12+) | 20–35 ms |
 | Frame processing rate (default) | 20 fps |
-| FaceNet inference (on-device) | ~80 ms (first inference after load) |
-| FaceNet inference (warm) | ~30–50 ms |
+| FaceNet inference (first call after load) | ~80 ms |
+| FaceNet inference (warm, subsequent) | ~30–50 ms |
 | Memory footprint (base, no Face ID) | ~45 MB |
 | Memory footprint (with Face ID loaded) | ~90 MB |
+| FaceNet model download (one-time) | ~23 MB |
 
 **Threading model:**
-- ML Kit face detection — main isolate (platform channel requirement)
-- YUV conversion + brightness/blur/hash — background isolate (`compute()`)
-- Face crop + FaceNet inference — background isolate (`compute()`)
-- UI rendering — main thread, never blocked
+
+| Work | Thread |
+|------|--------|
+| ML Kit face detection | Main isolate (platform channel requirement) |
+| YUV → NV21 + brightness/blur/hash | Background isolate (`compute()`) |
+| Face crop + resize + normalise | Background isolate (`compute()`) |
+| FaceNet embedding inference | Background isolate (`compute()`) |
+| UI rendering | Main thread — never blocked |
 
 **Tuning tips:**
 - Lower `targetFps` to `15` on low-end devices to reduce CPU load
 - Use `ResolutionPreset.medium` if 60 fps UI rendering is dropping frames
-- Set `enableFaceId: false` if you don't need identity — saves ~45 MB RAM and skips FaceNet inference
+- Set `enableFaceId: false` if you don't need identity — saves ~45 MB RAM and skips all FaceNet work
 
 ---
 
@@ -582,36 +712,78 @@ FlutterFaceLiveness (Widget)
 |--------|-----------|
 | Printed photo | Eye variance + face geometry signals in `AntiSpoofEngine` |
 | Screen replay (looped video) | FNV-1a frame hash sliding-window in `FrameHasher` |
-| Static image | Duplicate frame detection + micro-motion requirement |
-| Pre-recorded live video | Micro-motion signal (yaw/pitch variance over rolling window) |
+| Static image held to camera | Duplicate frame detection + micro-motion signal |
+| Pre-recorded live video | Micro-motion: yaw/pitch variance over 12-frame rolling window |
 | Deepfake / synthetic face | Optional TFLite model plug-in for ML-based PAD |
 | Predictable action sequence | Fisher-Yates shuffle per session |
-| Session replay attack | Cryptographically unique `sessionId` via `Random.secure()` |
-| Face spoofing (different person) | FaceNet cosine similarity ≥ threshold for Face ID matching |
-| Low-quality frames sneaking through | Brightness debounce + blur check before any liveness evaluation |
+| Session replay attack | `sessionId` generated with `Random.secure()` — cryptographically unique |
+| Identity spoofing (different person) | FaceNet cosine similarity ≥ threshold; `isFaceIdNew` signals mismatches |
+| Low-quality frames | BT.601 brightness with 6-frame debounce + blur check block all liveness evaluation |
 
-> **Note:** This package provides strong on-device liveness verification. For high-assurance KYC (banking, government), pair the `sessionId` and `faceId` with a server-side signature verification step.
+> **Note:** This package provides strong on-device liveness verification. For high-assurance KYC (banking, government), pair `sessionId` and `faceId` with a server-side signature verification step.
 
 ---
 
 ## Example App
 
-The `example/` directory contains a full demo app with:
+The `example/` directory contains a full demo app showcasing every feature.
 
-- Home screen with four challenge presets (Standard, Extended, Full, With Face ID)
-- Registered face IDs card — shows all stored Face IDs, tap any to copy, "Clear all" resets
-- Permission handling with a bottom sheet
-- Result screen with:
-  - Confidence score, completed actions, anti-spoof status, session duration
-  - Face ID row — tap to copy to clipboard
-  - Session ID
+### Home screen
+
+Four challenge presets:
+- **Standard Verification** — Blink · Turn Left · Turn Right
+- **Extended Challenge** — Blink · Look Up · Look Down · Smile
+- **Full Challenge** — Blink · Turn Left · Turn Right · Open Mouth
+- **With Face ID** — Blink · Turn Left with persistent identity
+
+**Registered Faces card** — appears after the first Face ID scan. Shows all stored `FID-XXXX` IDs with tap-to-copy. "Clear all" resets the device's face database.
+
+### Result screen
+
+After each successful verification:
+
+| Field | What it shows |
+|-------|---------------|
+| Confidence Score | Anti-spoof composite % |
+| Completed Actions | Which actions were performed |
+| Anti-Spoof | Passed / Spoof Detected |
+| **Face ID card** | **"New Face Registered"** (blue, first time) or **"Face Recognised — Welcome Back!"** (green, returning) with the `FID-XXXX` — tap to copy |
+| Session ID | Unique audit ID |
+| Duration | Session time in seconds |
+
+### Run it
 
 ```sh
 cd example
 flutter run
 ```
 
-> **Testing Face ID:** Use the **"With Face ID"** button. Complete the check → note the `FID-XXXX` in the result screen (tap it to copy). Close the app completely, reopen it, run the check again — **the exact same `FID-XXXX` will be returned**. This is the core guarantee: one face, one ID, forever.
+> **Testing Face ID persistence:**
+> 1. Tap **"With Face ID"** → complete the check → see `FID-XXXX` with **"New Face Registered"** banner
+> 2. Copy the Face ID (tap the row)
+> 3. Tap **Back** → run **"With Face ID"** again
+> 4. The result shows the **exact same** `FID-XXXX` with **"Face Recognised — Welcome Back!"** banner
+> 5. Close the app completely → reopen → scan again → same ID still returned
+>
+> This is the core guarantee: **one face, one ID, forever**.
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
+**Latest — v2.0.0:**
+- Persistent Face ID with `isFaceIdNew` flag (new / returning face detection)
+- FaceNet TFLite auto-download with progress UI
+- Isolate-based ML preprocessing (YUV, brightness, embedding)
+- 7-signal anti-spoof engine
+- Platform-correct BT.601 brightness (fixes iOS false "too dark")
+- 6-frame brightness debounce (eliminates startup flicker)
+- `Random.secure()` session IDs
+- `openMouth` liveness action
+- Dark / light / system theming
+- Android minSdk raised to 26
 
 ---
 

@@ -16,6 +16,7 @@ class LivenessResult {
     this.sessionDurationMs,
     this.sessionId,
     this.faceId,
+    this.isFaceIdNew,
   });
 
   /// Convenience constructor for a successful result.
@@ -90,9 +91,14 @@ class LivenessResult {
   /// Format: `FID-3A9F2B1C4E8D…` (24 hex chars).
   final String? faceId;
 
-  /// Returns a copy with [faceId] set (used by LivenessController after
-  /// the identity service resolves the ID asynchronously).
-  LivenessResult withFaceId(String id) => LivenessResult(
+  /// `true`  → this face was seen for the **first time** — a new ID was created.
+  /// `false` → this face was **recognised** — the existing ID was returned.
+  /// `null`  → Face ID is disabled (`enableFaceId: false`).
+  final bool? isFaceIdNew;
+
+  /// Returns a copy with [faceId] and [isNew] set (used by LivenessController
+  /// after the identity service resolves the ID asynchronously).
+  LivenessResult withFaceId(String id, {required bool isNew}) => LivenessResult(
         isSuccess: isSuccess,
         completedActions: completedActions,
         confidenceScore: confidenceScore,
@@ -104,6 +110,7 @@ class LivenessResult {
         sessionDurationMs: sessionDurationMs,
         sessionId: sessionId,
         faceId: id,
+        isFaceIdNew: isNew,
       );
 
   @override
