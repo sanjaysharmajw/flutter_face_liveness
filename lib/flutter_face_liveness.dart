@@ -36,3 +36,7 @@ export 'src/models/frame_quality.dart';
 export 'src/ml/anti_spoof_engine.dart' show AntiSpoofEngine, AntiSpoofResult;
 export 'src/ml/tflite_service.dart'    show TFLiteService;
 export 'src/security/session_manager.dart' show SessionManager;
+
+// Face identity
+export 'src/identity/face_identity_service.dart' show FaceIdentityService;
+export 'src/ml/face_detector_service.dart' show RawFrameData;

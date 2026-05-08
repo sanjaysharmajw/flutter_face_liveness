@@ -15,6 +15,7 @@ class LivenessResult {
     this.failureReason,
     this.sessionDurationMs,
     this.sessionId,
+    this.faceId,
   });
 
   /// Convenience constructor for a successful result.
@@ -81,6 +82,29 @@ class LivenessResult {
 
   /// Unique session identifier for audit trails.
   final String? sessionId;
+
+  /// Persistent face identity — same physical person always gets the same ID,
+  /// even across separate app sessions.
+  ///
+  /// Non-null only when [LivenessConfig.enableFaceId] is `true`.
+  /// Format: `FID-3A9F2B1C4E8D…` (24 hex chars).
+  final String? faceId;
+
+  /// Returns a copy with [faceId] set (used by LivenessController after
+  /// the identity service resolves the ID asynchronously).
+  LivenessResult withFaceId(String id) => LivenessResult(
+        isSuccess: isSuccess,
+        completedActions: completedActions,
+        confidenceScore: confidenceScore,
+        isRealHuman: isRealHuman,
+        spoofDetected: spoofDetected,
+        deepfakeDetected: deepfakeDetected,
+        tfliteScore: tfliteScore,
+        failureReason: failureReason,
+        sessionDurationMs: sessionDurationMs,
+        sessionId: sessionId,
+        faceId: id,
+      );
 
   @override
   String toString() => 'LivenessResult('

@@ -156,6 +156,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           LivenessAction.openMouth,
                         ]),
                       ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.fingerprint_rounded,
+                        title: 'With Face ID',
+                        subtitle: 'Same face → same ID across sessions',
+                        accentColor: _success,
+                        onTap: () => _launchWithFaceId(context),
+                      ),
                     ],
                   ),
                 ),
@@ -189,6 +197,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return;
     }
     await Navigator.of(ctx).push(_fade(LivenessScreen(actions: actions)));
+  }
+
+  Future<void> _launchWithFaceId(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+      enableFaceId: true,
+    )));
   }
 
   void _showPermissionSheet(BuildContext ctx) {
@@ -259,18 +280,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 // ─────────────────────────────────────────────
 
 class LivenessScreen extends StatelessWidget {
-  const LivenessScreen({super.key, required this.actions});
+  const LivenessScreen({
+    super.key,
+    required this.actions,
+    this.enableFaceId = false,
+  });
   final List<LivenessAction> actions;
+  final bool enableFaceId;
 
   @override
   Widget build(BuildContext context) {
     return FlutterFaceLiveness(
       actions: actions,
-      config: const LivenessConfig(
+      config: LivenessConfig(
         randomizeActions: true,
         enableAntiSpoof: true,
         enableBrightnessCheck: true,
         enableBlurDetection: true,
+        enableFaceId: enableFaceId,
         showDebugOverlay: false,
       ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
@@ -467,6 +494,15 @@ class _StatsCard extends StatelessWidget {
             value: result.spoofDetected ? 'Spoof Detected' : 'Passed',
             accent: result.spoofDetected ? _error : _success,
           ),
+          if (result.faceId != null) ...[
+            _divider(),
+            _StatTile(
+              icon: Icons.face_rounded,
+              label: 'Face ID (Persistent)',
+              value: result.faceId!,
+              accent: _success,
+            ),
+          ],
           if (result.sessionId != null) ...[
             _divider(),
             _StatTile(

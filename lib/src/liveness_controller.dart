@@ -11,6 +11,7 @@ import 'camera/camera_service.dart';
 import 'ml/face_detector_service.dart';
 import 'ml/tflite_service.dart';
 import 'liveness/liveness_engine.dart';
+import 'identity/face_identity_service.dart';
 
 /// ChangeNotifier that drives the full liveness verification session.
 ///
@@ -31,14 +32,16 @@ class LivenessController extends ChangeNotifier {
 
   final CameraService _cameraService = CameraService();
   final FaceDetectorService _faceDetector = FaceDetectorService();
-  TFLiteService? _tflite;
-  late LivenessEngine _engine;
+  TFLiteService?        _tflite;
+  FaceIdentityService?  _faceIdentity;
+  late LivenessEngine   _engine;
 
   bool _isInitialized = false;
   bool _isDisposed    = false;
-  FaceData?     _currentFace;
-  FrameQuality? _lastQuality;
-  String?       _error;
+  FaceData?      _currentFace;
+  FrameQuality?  _lastQuality;
+  RawFrameData?  _lastRawFrame;
+  String?        _error;
 
   // ── Public getters ──────────────────────────────────────────────────────
   bool            get isInitialized   => _isInitialized;
@@ -66,7 +69,7 @@ class LivenessController extends ChangeNotifier {
 
   Future<void> initialize() async {
     try {
-      // TFLite (optional)
+      // TFLite anti-spoof model (optional)
       if (_config.enableTFLite && _config.tfliteModelPath != null) {
         _tflite = TFLiteService(
           modelPath: _config.tfliteModelPath!,
@@ -75,12 +78,20 @@ class LivenessController extends ChangeNotifier {
         await _tflite!.load();
       }
 
+      // MobileFaceNet face identity (optional)
+      if (_config.enableFaceId) {
+        _faceIdentity = FaceIdentityService(
+          similarityThreshold: _config.faceIdSimilarityThreshold,
+        );
+        await _faceIdentity!.initialize();
+      }
+
       _engine = LivenessEngine(
         requiredActions: _actions,
         config: _config,
         onActionCompleted: (_) => notifyListeners(),
         onStatusChanged:   (_) => notifyListeners(),
-        onAllActionsCompleted: _onEngineComplete,
+        onAllActionsCompleted: (r) => _onEngineComplete(r),
       );
 
       final camera = await _cameraService.getFrontCamera();
@@ -116,22 +127,41 @@ class LivenessController extends ChangeNotifier {
       image,
       camera.sensorOrientation,
       camera.lensDirection,
+      captureRawFrame: _config.enableFaceId,
     );
 
     if (_isDisposed) return;
 
-    _currentFace = result.faces.isNotEmpty ? result.faces.first : null;
-    _lastQuality = result.quality;
+    _currentFace  = result.faces.isNotEmpty ? result.faces.first : null;
+    _lastQuality  = result.quality;
+    if (result.rawFrame != null) _lastRawFrame = result.rawFrame;
 
     _engine.processFrame(result.faces, quality: result.quality);
     notifyListeners();
   }
 
-  void _onEngineComplete(LivenessResult result) {
-    if (result.isSuccess) {
-      onSuccess(result);
+  Future<void> _onEngineComplete(LivenessResult result) async {
+    var finalResult = result;
+
+    // Resolve persistent faceId after successful liveness
+    if (result.isSuccess && _faceIdentity != null && _currentFace != null) {
+      final raw = _lastRawFrame;
+      if (raw != null) {
+        final faceId = await _faceIdentity!.identifyFromFrame(
+          imageBytes:        raw.nv21Bytes,
+          imageWidth:        raw.imageWidth,
+          imageHeight:       raw.imageHeight,
+          faceBoundingBox:   _currentFace!.boundingBox,
+          sensorOrientation: raw.sensorOrientation,
+        );
+        if (faceId != null) finalResult = result.withFaceId(faceId);
+      }
+    }
+
+    if (finalResult.isSuccess) {
+      onSuccess(finalResult);
     } else {
-      onFailed(result.failureReason ?? 'Liveness check failed');
+      onFailed(finalResult.failureReason ?? 'Liveness check failed');
     }
     notifyListeners();
   }
@@ -141,9 +171,15 @@ class LivenessController extends ChangeNotifier {
   Future<void> reset() async {
     if (!_isInitialized) return;
     _engine.reset(_actions);
-    _currentFace = null;
-    _lastQuality = null;
+    _currentFace  = null;
+    _lastQuality  = null;
+    _lastRawFrame = null;
     notifyListeners();
+  }
+
+  /// Clear all stored face embeddings on this device (e.g. on user logout).
+  Future<void> clearFaceIdentities() async {
+    await _faceIdentity?.clearAllFaces();
   }
 
   @override
@@ -152,6 +188,7 @@ class LivenessController extends ChangeNotifier {
     await _cameraService.dispose();
     await _faceDetector.dispose();
     _tflite?.dispose();
+    _faceIdentity?.dispose();
     _engine.dispose();
     super.dispose();
   }

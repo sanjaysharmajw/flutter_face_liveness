@@ -39,6 +39,10 @@ class LivenessConfig {
     this.enableDuplicateFrameDetection = true,
     this.duplicateFrameWindowSize = 8,
 
+    // ── Face Identity ────────────────────────────────────────────────────
+    this.enableFaceId = false,
+    this.faceIdSimilarityThreshold = 0.78,
+
     // ── UI ───────────────────────────────────────────────────────────────
     this.themeMode = ThemeMode.dark,
     this.showDebugOverlay = false,
@@ -99,6 +103,21 @@ class LivenessConfig {
   /// Number of recent frame hashes kept for duplicate comparison.
   final int duplicateFrameWindowSize;
 
+  // ── Face Identity ─────────────────────────────────────────────────────────
+  /// Enable MobileFaceNet-based persistent face identity.
+  ///
+  /// When `true`, [LivenessResult.faceId] is populated after each successful
+  /// verification. The same physical person always receives the same ID,
+  /// even across separate app sessions.
+  ///
+  /// Requires the bundled model: run `scripts/download_face_model.sh` once
+  /// after adding the package to download the MobileFaceNet weights.
+  final bool enableFaceId;
+
+  /// Cosine-similarity threshold (0.0–1.0) for matching an existing face.
+  /// Raise for stricter identity matching; lower to tolerate more variation.
+  final double faceIdSimilarityThreshold;
+
   // ── UI ────────────────────────────────────────────────────────────────────
   final ThemeMode themeMode;
   final bool showDebugOverlay;
@@ -130,6 +149,8 @@ class LivenessConfig {
     double? faceTooCloseRatio,
     bool? enableDuplicateFrameDetection,
     int? duplicateFrameWindowSize,
+    bool? enableFaceId,
+    double? faceIdSimilarityThreshold,
     ThemeMode? themeMode,
     bool? showDebugOverlay,
   }) {
@@ -154,6 +175,8 @@ class LivenessConfig {
           enableDuplicateFrameDetection ?? this.enableDuplicateFrameDetection,
       duplicateFrameWindowSize:
           duplicateFrameWindowSize ?? this.duplicateFrameWindowSize,
+      enableFaceId: enableFaceId ?? this.enableFaceId,
+      faceIdSimilarityThreshold: faceIdSimilarityThreshold ?? this.faceIdSimilarityThreshold,
       themeMode: themeMode ?? this.themeMode,
       showDebugOverlay: showDebugOverlay ?? this.showDebugOverlay,
     );

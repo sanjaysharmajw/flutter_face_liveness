@@ -20,6 +20,8 @@ dependencies:
   camera: ^0.10.5+9
   provider: ^6.1.2
   permission_handler: ^11.3.1
+  tflite_flutter: ^0.10.4
+  shared_preferences: ^2.2.2
 
 dev_dependencies:
   flutter_test:
@@ -34,3 +36,6 @@ flutter:
         pluginClass: FlutterFaceLivenessPlugin
       ios:
         pluginClass: FlutterFaceLivenessPlugin
+
+  assets:
+    - assets/models/mobile_face_net.tflite

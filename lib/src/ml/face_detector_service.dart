@@ -9,15 +9,33 @@ import '../models/face_data.dart';
 import '../models/frame_quality.dart';
 import 'frame_processor.dart';
 
+/// Raw frame metadata forwarded to FaceIdentityService when enableFaceId is on.
+class RawFrameData {
+  const RawFrameData({
+    required this.nv21Bytes,
+    required this.imageWidth,
+    required this.imageHeight,
+    required this.sensorOrientation,
+  });
+  final Uint8List nv21Bytes;
+  final int imageWidth;
+  final int imageHeight;
+  final int sensorOrientation;
+}
+
 /// Result bundle returned per camera frame.
 class FaceDetectionResult {
   const FaceDetectionResult({
     required this.faces,
     required this.quality,
+    this.rawFrame,
   });
 
   final List<FaceData> faces;
   final FrameQuality quality;
+
+  /// Present only when [LivenessConfig.enableFaceId] is true.
+  final RawFrameData? rawFrame;
 }
 
 /// Wraps Google ML Kit face detection.
@@ -44,12 +62,16 @@ class FaceDetectorService {
 
   /// Process one camera frame.
   ///
+  /// Set [captureRawFrame] to `true` (when FaceId is enabled) to attach the
+  /// NV21 bytes to the result so the identity service can run the embedding.
+  ///
   /// Returns an empty result on error or after dispose.
   Future<FaceDetectionResult> processCameraImage(
     CameraImage image,
     int sensorOrientation,
-    CameraLensDirection lensDirection,
-  ) async {
+    CameraLensDirection lensDirection, {
+    bool captureRawFrame = false,
+  }) async {
     if (_isDisposed) {
       return const FaceDetectionResult(
         faces: [],
@@ -84,7 +106,16 @@ class FaceDetectorService {
           .map((f) => FaceData.fromFace(f, imageSize))
           .toList();
 
-      return FaceDetectionResult(faces: faceData, quality: processed.quality);
+      final rawFrame = captureRawFrame
+          ? RawFrameData(
+              nv21Bytes:         processed.nv21Bytes,
+              imageWidth:        image.width,
+              imageHeight:       image.height,
+              sensorOrientation: sensorOrientation,
+            )
+          : null;
+
+      return FaceDetectionResult(faces: faceData, quality: processed.quality, rawFrame: rawFrame);
     } catch (e) {
       debugPrint('[FaceDetectorService] Error: $e');
       return const FaceDetectionResult(
