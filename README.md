@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 
-![flutter_face_liveness banner](screenshots/banner.png)
+![flutter_face_liveness banner](https://raw.githubusercontent.com/sanjaysharmajw/flutter_face_liveness/main/screenshots/banner.png)
 
 Production-ready AI-powered Flutter SDK for **real-time face liveness detection, anti-spoof protection, and persistent face identity** — powered by Google ML Kit + TensorFlow Lite. All processing runs **entirely on-device** with zero network calls (except the one-time FaceNet model download when Face ID is enabled).
 
