@@ -1,9 +1,13 @@
 name: flutter_face_liveness
-description: A production-ready Flutter package for real-time face detection and liveness verification using Google ML Kit. Supports eye blink, head movement, and anti-spoofing for KYC, attendance, and identity verification.
-version: 1.0.0
-homepage: https://github.com/your-org/flutter_face_liveness
-repository: https://github.com/your-org/flutter_face_liveness
-issue_tracker: https://github.com/your-org/flutter_face_liveness/issues
+description: >-
+  Production-ready AI-powered Flutter SDK for real-time face detection,
+  liveness verification, and anti-spoof protection using Google ML Kit +
+  TensorFlow Lite. Isolate-based ML processing, advanced anti-spoofing,
+  frame-level security for KYC, banking, biometric auth, and enterprise apps.
+version: 2.0.0
+homepage: https://github.com/sanjaysharmajw/flutter_face_liveness
+repository: https://github.com/sanjaysharmajw/flutter_face_liveness
+issue_tracker: https://github.com/sanjaysharmajw/flutter_face_liveness/issues
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -15,7 +19,6 @@ dependencies:
   google_mlkit_face_detection: ^0.11.0
   camera: ^0.10.5+9
   provider: ^6.1.2
-  image: ^4.1.7
   permission_handler: ^11.3.1
 
 dev_dependencies:

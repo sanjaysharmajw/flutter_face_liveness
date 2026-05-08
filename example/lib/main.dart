@@ -143,6 +143,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           LivenessAction.smile,
                         ]),
                       ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.face_retouching_natural_rounded,
+                        title: 'Full Challenge',
+                        subtitle: 'Blink  ·  Turn Left  ·  Turn Right  ·  Open Mouth',
+                        accentColor: _purple,
+                        onTap: () => _launch(context, [
+                          LivenessAction.blink,
+                          LivenessAction.turnLeft,
+                          LivenessAction.turnRight,
+                          LivenessAction.openMouth,
+                        ]),
+                      ),
                     ],
                   ),
                 ),
@@ -253,7 +266,13 @@ class LivenessScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return FlutterFaceLiveness(
       actions: actions,
-      showDebugInfo: false,
+      config: const LivenessConfig(
+        randomizeActions: true,
+        enableAntiSpoof: true,
+        enableBrightnessCheck: true,
+        enableBlurDetection: true,
+        showDebugOverlay: false,
+      ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
         _fade(ResultScreen(result: result, success: true)),
       ),
@@ -429,8 +448,7 @@ class _StatsCard extends StatelessWidget {
           _StatTile(
             icon: Icons.shield_outlined,
             label: 'Confidence Score',
-            value:
-                '${(result.confidenceScore * 100).toStringAsFixed(1)}%',
+            value: '${(result.confidenceScore * 100).toStringAsFixed(1)}%',
             accent: _success,
           ),
           _divider(),
@@ -440,14 +458,31 @@ class _StatsCard extends StatelessWidget {
             value: result.completedActions.map((a) => a.name).join(' · '),
             accent: _primary,
           ),
+          _divider(),
+          _StatTile(
+            icon: result.spoofDetected
+                ? Icons.warning_amber_rounded
+                : Icons.verified_user_outlined,
+            label: 'Anti-Spoof',
+            value: result.spoofDetected ? 'Spoof Detected' : 'Passed',
+            accent: result.spoofDetected ? _error : _success,
+          ),
+          if (result.sessionId != null) ...[
+            _divider(),
+            _StatTile(
+              icon: Icons.fingerprint_rounded,
+              label: 'Session ID',
+              value: result.sessionId!,
+              accent: _cyan,
+            ),
+          ],
           if (result.sessionDurationMs != null) ...[
             _divider(),
             _StatTile(
               icon: Icons.timer_outlined,
               label: 'Duration',
-              value:
-                  '${(result.sessionDurationMs! / 1000).toStringAsFixed(1)}s',
-              accent: _cyan,
+              value: '${(result.sessionDurationMs! / 1000).toStringAsFixed(1)}s',
+              accent: _purple,
             ),
           ],
         ],

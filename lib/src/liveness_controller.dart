@@ -1,60 +1,83 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+
 import 'models/face_data.dart';
 import 'models/liveness_action.dart';
+import 'models/liveness_config.dart';
 import 'models/liveness_result.dart';
 import 'models/detection_status.dart';
+import 'models/frame_quality.dart';
 import 'camera/camera_service.dart';
 import 'ml/face_detector_service.dart';
+import 'ml/tflite_service.dart';
 import 'liveness/liveness_engine.dart';
 
-/// ChangeNotifier that drives the entire liveness session.
+/// ChangeNotifier that drives the full liveness verification session.
 ///
-/// Exposes all state needed by the widget tree and handles the full lifecycle:
-/// camera init → frame processing → liveness evaluation → completion.
+/// Lifecycle: [initialize] → frames processed automatically → callbacks fired.
 class LivenessController extends ChangeNotifier {
   LivenessController({
     required List<LivenessAction> actions,
     required this.onSuccess,
     required this.onFailed,
-    this.sessionTimeoutMs = 60000,
-    ResolutionPreset cameraResolution = ResolutionPreset.high,
+    LivenessConfig config = const LivenessConfig(),
   })  : _actions = actions,
-        _cameraResolution = cameraResolution;
+        _config  = config;
 
   final List<LivenessAction> _actions;
+  final LivenessConfig _config;
   final void Function(LivenessResult result) onSuccess;
-  final void Function(String reason) onFailed;
-  final int sessionTimeoutMs;
-  final ResolutionPreset _cameraResolution;
+  final void Function(String reason)          onFailed;
 
   final CameraService _cameraService = CameraService();
   final FaceDetectorService _faceDetector = FaceDetectorService();
-  late final LivenessEngine _engine;
+  TFLiteService? _tflite;
+  late LivenessEngine _engine;
 
   bool _isInitialized = false;
-  bool _isDisposed = false;
-  FaceData? _currentFace;
-  String? _error;
+  bool _isDisposed    = false;
+  FaceData?     _currentFace;
+  FrameQuality? _lastQuality;
+  String?       _error;
 
-  bool get isInitialized => _isInitialized;
-  FaceData? get currentFace => _currentFace;
-  String? get error => _error;
+  // ── Public getters ──────────────────────────────────────────────────────
+  bool            get isInitialized   => _isInitialized;
+  FaceData?       get currentFace     => _currentFace;
+  FrameQuality?   get lastQuality     => _lastQuality;
+  String?         get error           => _error;
   CameraController? get cameraController => _cameraService.controller;
-  DetectionStatus get status => _isInitialized ? _engine.status : DetectionStatus.initializing;
-  LivenessAction? get currentAction => _isInitialized ? _engine.currentAction : null;
-  double get progress => _isInitialized ? _engine.progress : 0.0;
-  int get completedCount => _isInitialized ? _engine.completedActions.length : 0;
-  int get totalActions => _actions.length;
-  bool get isComplete => _isInitialized && _engine.isComplete;
+
+  DetectionStatus get status =>
+      _isInitialized ? _engine.status : DetectionStatus.initializing;
+  LivenessAction? get currentAction  =>
+      _isInitialized ? _engine.currentAction : null;
+  List<LivenessAction> get sequence  =>
+      _isInitialized ? _engine._sequence : _actions;
+  double  get progress       => _isInitialized ? _engine.progress      : 0.0;
+  int     get completedCount => _isInitialized ? _engine.completedActions.length : 0;
+  int     get totalActions   => _actions.length;
+  bool    get isComplete     => _isInitialized && _engine.isComplete;
+  String? get sessionId      => _isInitialized ? _engine.sessionId : null;
+  LivenessConfig get config  => _config;
+
+  // ── Initialisation ──────────────────────────────────────────────────────
 
   Future<void> initialize() async {
     try {
+      // TFLite (optional)
+      if (_config.enableTFLite && _config.tfliteModelPath != null) {
+        _tflite = TFLiteService(
+          modelPath: _config.tfliteModelPath!,
+          inputSize: _config.tfliteInputSize,
+        );
+        await _tflite!.load();
+      }
+
       _engine = LivenessEngine(
         requiredActions: _actions,
-        sessionTimeoutMs: sessionTimeoutMs,
+        config: _config,
         onActionCompleted: (_) => notifyListeners(),
-        onStatusChanged: (_) => notifyListeners(),
+        onStatusChanged:   (_) => notifyListeners(),
         onAllActionsCompleted: _onEngineComplete,
       );
 
@@ -67,8 +90,8 @@ class LivenessController extends ChangeNotifier {
 
       await _cameraService.initialize(
         camera: camera,
-        resolution: _cameraResolution,
-        onFrame: (image) => _processFrame(image, camera),  // returns Future<void>
+        config: _config,
+        onFrame: (image) => _processFrame(image, camera),
       );
 
       _isInitialized = true;
@@ -79,10 +102,15 @@ class LivenessController extends ChangeNotifier {
     }
   }
 
-  Future<void> _processFrame(CameraImage image, CameraDescription camera) async {
+  // ── Per-frame pipeline ──────────────────────────────────────────────────
+
+  Future<void> _processFrame(
+    CameraImage image,
+    CameraDescription camera,
+  ) async {
     if (_isDisposed || !_isInitialized) return;
 
-    final faces = await _faceDetector.processCameraImage(
+    final result = await _faceDetector.processCameraImage(
       image,
       camera.sensorOrientation,
       camera.lensDirection,
@@ -90,10 +118,10 @@ class LivenessController extends ChangeNotifier {
 
     if (_isDisposed) return;
 
-    _currentFace = faces.isNotEmpty ? faces.first : null;
-    _engine.processFrame(faces);
+    _currentFace = result.faces.isNotEmpty ? result.faces.first : null;
+    _lastQuality = result.quality;
 
-    // notifyListeners is called by engine callbacks; also update face position
+    _engine.processFrame(result.faces, quality: result.quality);
     notifyListeners();
   }
 
@@ -106,9 +134,13 @@ class LivenessController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Reset / Dispose ─────────────────────────────────────────────────────
+
   Future<void> reset() async {
-    _engine.reset();
+    if (!_isInitialized) return;
+    _engine.reset(_actions);
     _currentFace = null;
+    _lastQuality = null;
     notifyListeners();
   }
 
@@ -117,7 +149,15 @@ class LivenessController extends ChangeNotifier {
     _isDisposed = true;
     await _cameraService.dispose();
     await _faceDetector.dispose();
+    _tflite?.dispose();
     _engine.dispose();
     super.dispose();
   }
+}
+
+// Allow reading internal sequence for UI purposes
+extension _EngineSequence on LivenessEngine {
+  List<LivenessAction> get _sequence => super.remainingActions.isEmpty
+      ? completedActions
+      : [...completedActions, ...remainingActions];
 }

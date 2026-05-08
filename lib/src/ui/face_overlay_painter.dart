@@ -1,12 +1,14 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../models/face_data.dart';
 import '../models/detection_status.dart';
+import '../models/face_data.dart';
 
+/// Draws the animated face-guide oval, pulsing ring, and corner brackets.
 class FaceOverlayPainter extends CustomPainter {
   const FaceOverlayPainter({
     required this.status,
     required this.animationValue,
+    required this.isDark,
     this.faceData,
     this.previewSize,
     this.isFrontCamera = true,
@@ -14,6 +16,7 @@ class FaceOverlayPainter extends CustomPainter {
 
   final DetectionStatus status;
   final double animationValue;
+  final bool isDark;
   final FaceData? faceData;
   final Size? previewSize;
   final bool isFrontCamera;
@@ -36,32 +39,31 @@ class FaceOverlayPainter extends CustomPainter {
     canvas.drawPath(
       path,
       Paint()
-        ..color = Colors.black.withOpacity(0.62)
+        ..color = Colors.black.withOpacity(isDark ? 0.62 : 0.45)
         ..style = PaintingStyle.fill,
     );
   }
 
   void _drawPulseRing(Canvas canvas, Size size) {
-    final oval = _ovalRect(size);
-    final expand = 6.0 + animationValue * 14.0;
-    final opacity = (1.0 - animationValue) * 0.5;
-    final color = _statusColor();
-
+    if (status.isError) return;
+    final oval    = _ovalRect(size);
+    final expand  = 6.0 + animationValue * 16.0;
+    final opacity = (1.0 - animationValue) * 0.45;
     canvas.drawOval(
       oval.inflate(expand),
       Paint()
-        ..color = color.withOpacity(opacity)
+        ..color = _borderColor().withOpacity(opacity)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
     );
   }
 
   void _drawOvalBorder(Canvas canvas, Size size) {
-    final oval = _ovalRect(size);
-    final color = _statusColor();
+    final oval  = _ovalRect(size);
+    final color = _borderColor();
 
-    // Gradient stroke via shader on a rect that covers the oval
+    // Rotating sweep gradient gives a shimmer/scanning feel
     final shader = SweepGradient(
       colors: [
         color.withOpacity(0.9),
@@ -82,20 +84,18 @@ class FaceOverlayPainter extends CustomPainter {
   }
 
   void _drawCornerBrackets(Canvas canvas, Size size) {
-    final oval = _ovalRect(size);
-    final color = _statusColor();
-    const arcSpan = math.pi / 7;
-
+    final oval  = _ovalRect(size);
+    final color = _borderColor();
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round;
 
-    // 4 corner accents positioned at top, right, bottom, left
+    const span = math.pi / 7;
     for (int i = 0; i < 4; i++) {
       final center = math.pi / 2 * i;
-      canvas.drawArc(oval, center - arcSpan / 2, arcSpan, false, paint);
+      canvas.drawArc(oval, center - span / 2, span, false, paint);
     }
   }
 
@@ -104,11 +104,12 @@ class FaceOverlayPainter extends CustomPainter {
     final cy = size.height * 0.42;
     final rx = size.width * 0.38;
     final ry = size.height * 0.24;
-    return Rect.fromCenter(center: Offset(cx, cy), width: rx * 2, height: ry * 2);
+    return Rect.fromCenter(
+        center: Offset(cx, cy), width: rx * 2, height: ry * 2);
   }
 
-  Color _statusColor() {
-    if (status.isError) return const Color(0xFFEF4444);
+  Color _borderColor() {
+    if (status.isError)   return const Color(0xFFEF4444);
     if (status.isSuccess) return const Color(0xFF10B981);
     if (status == DetectionStatus.actionInProgress) {
       return Color.lerp(
@@ -124,5 +125,6 @@ class FaceOverlayPainter extends CustomPainter {
   bool shouldRepaint(FaceOverlayPainter old) =>
       old.status != status ||
       old.animationValue != animationValue ||
-      old.faceData != faceData;
+      old.faceData != faceData ||
+      old.isDark != isDark;
 }

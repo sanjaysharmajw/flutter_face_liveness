@@ -6,6 +6,7 @@ class LivenessInstructionsWidget extends StatelessWidget {
   const LivenessInstructionsWidget({
     super.key,
     required this.status,
+    required this.isDark,
     this.currentAction,
     this.progress = 0.0,
     this.totalActions = 0,
@@ -13,6 +14,7 @@ class LivenessInstructionsWidget extends StatelessWidget {
   });
 
   final DetectionStatus status;
+  final bool isDark;
   final LivenessAction? currentAction;
   final double progress;
   final int totalActions;
@@ -24,33 +26,39 @@ class LivenessInstructionsWidget extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.55),
+          color: isDark
+              ? Colors.black.withOpacity(0.60)
+              : Colors.white.withOpacity(0.90),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withOpacity(0.08)),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withOpacity(0.08)
+                : Colors.black.withOpacity(0.06),
+          ),
         ),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (totalActions > 0) ...[
-              _ProgressHeader(
+              _ProgressBar(
                 completed: completedCount,
                 total: totalActions,
                 progress: progress,
                 isSuccess: status.isSuccess,
+                isDark: isDark,
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
             ],
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 320),
+              duration: const Duration(milliseconds: 300),
               switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
               transitionBuilder: (child, anim) => FadeTransition(
                 opacity: anim,
                 child: SlideTransition(
-                  position:
-                      Tween(begin: const Offset(0, 0.15), end: Offset.zero)
-                          .animate(anim),
+                  position: Tween(
+                          begin: const Offset(0, 0.12), end: Offset.zero)
+                      .animate(anim),
                   child: child,
                 ),
               ),
@@ -58,6 +66,7 @@ class LivenessInstructionsWidget extends StatelessWidget {
                 key: ValueKey('$status-$currentAction'),
                 status: status,
                 action: currentAction,
+                isDark: isDark,
               ),
             ),
           ],
@@ -67,17 +76,19 @@ class LivenessInstructionsWidget extends StatelessWidget {
   }
 }
 
-class _ProgressHeader extends StatelessWidget {
-  const _ProgressHeader({
+class _ProgressBar extends StatelessWidget {
+  const _ProgressBar({
     required this.completed,
     required this.total,
     required this.progress,
     required this.isSuccess,
+    required this.isDark,
   });
   final int completed;
   final int total;
   final double progress;
   final bool isSuccess;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
@@ -92,17 +103,23 @@ class _ProgressHeader extends StatelessWidget {
           children: [
             Text(
               'Step $completed of $total',
-              style: const TextStyle(
-                  color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                color: isDark ? Colors.white54 : Colors.black45,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
             ),
             Text(
               '${(progress * 100).toInt()}%',
               style: TextStyle(
-                  color: trackColor, fontSize: 12, fontWeight: FontWeight.w700),
+                color: trackColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 7),
         ClipRRect(
           borderRadius: BorderRadius.circular(6),
           child: TweenAnimationBuilder<double>(
@@ -112,7 +129,8 @@ class _ProgressHeader extends StatelessWidget {
             builder: (_, v, __) => LinearProgressIndicator(
               value: v,
               minHeight: 5,
-              backgroundColor: Colors.white12,
+              backgroundColor:
+                  isDark ? Colors.white12 : Colors.black.withOpacity(0.08),
               valueColor: AlwaysStoppedAnimation<Color>(trackColor),
             ),
           ),
@@ -123,14 +141,15 @@ class _ProgressHeader extends StatelessWidget {
 }
 
 class _InstructionRow extends StatelessWidget {
-  const _InstructionRow({super.key, required this.status, this.action});
+  const _InstructionRow(
+      {super.key, required this.status, this.action, required this.isDark});
   final DetectionStatus status;
   final LivenessAction? action;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
     final (emoji, text, color) = _resolve();
-
     return Row(
       children: [
         Container(
@@ -149,8 +168,8 @@ class _InstructionRow extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
               fontSize: 14,
               fontWeight: FontWeight.w600,
               height: 1.4,

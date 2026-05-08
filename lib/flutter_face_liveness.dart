@@ -1,29 +1,38 @@
-/// Flutter Face Liveness — real-time face detection and liveness verification
-/// using Google ML Kit.
+/// Flutter Face Liveness — AI-powered face detection, liveness verification,
+/// and anti-spoof protection using Google ML Kit + optional TFLite.
 ///
 /// ## Quick start
 /// ```dart
 /// import 'package:flutter_face_liveness/flutter_face_liveness.dart';
 ///
 /// FlutterFaceLiveness(
-///   actions: [
-///     LivenessAction.blink,
-///     LivenessAction.turnLeft,
-///     LivenessAction.turnRight,
-///   ],
+///   actions: [LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.smile],
+///   config: LivenessConfig(
+///     randomizeActions: true,
+///     enableAntiSpoof: true,
+///   ),
 ///   onSuccess: (result) {
-///     print('Verified with confidence ${result.confidenceScore}');
+///     print('Verified — session: ${result.sessionId}');
+///     print('Confidence: ${result.confidenceScore}');
 ///   },
-///   onFailed: (reason) {
-///     print('Failed: $reason');
-///   },
+///   onFailed: (reason) => print('Failed: $reason'),
 /// )
 /// ```
 library flutter_face_liveness;
 
+// Widget + controller
 export 'src/flutter_face_liveness_widget.dart';
 export 'src/liveness_controller.dart';
+
+// Models
 export 'src/models/liveness_action.dart';
+export 'src/models/liveness_config.dart';
 export 'src/models/liveness_result.dart';
 export 'src/models/face_data.dart';
 export 'src/models/detection_status.dart';
+export 'src/models/frame_quality.dart';
+
+// ML / security (useful for advanced integrations)
+export 'src/ml/anti_spoof_engine.dart' show AntiSpoofEngine, AntiSpoofResult;
+export 'src/ml/tflite_service.dart'    show TFLiteService;
+export 'src/security/session_manager.dart' show SessionManager;

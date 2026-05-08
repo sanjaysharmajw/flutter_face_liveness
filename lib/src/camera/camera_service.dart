@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import '../models/liveness_config.dart';
 
 /// Manages camera lifecycle, stream access, and frame throttling.
 class CameraService {
@@ -8,48 +9,54 @@ class CameraService {
   bool _isProcessingFrame = false;
   int _lastProcessedMs = 0;
 
-  /// Minimum milliseconds between ML processing calls (~20 fps).
-  static const int _frameThrottleMs = 50;
-
   CameraController? get controller => _controller;
   bool get isInitialized => _controller?.value.isInitialized ?? false;
 
   Future<void> initialize({
     required CameraDescription camera,
-    required ResolutionPreset resolution,
-    // Async callback — processing is awaited so _isProcessingFrame works correctly
+    required LivenessConfig config,
     required Future<void> Function(CameraImage image) onFrame,
   }) async {
     await dispose();
 
     _controller = CameraController(
       camera,
-      resolution,
+      config.cameraResolution,
       enableAudio: false,
-      // yuv420 is supported by all Android devices (NV21 is rejected on many MIUI/Pixel devices)
       imageFormatGroup: defaultTargetPlatform == TargetPlatform.android
           ? ImageFormatGroup.yuv420
           : ImageFormatGroup.bgra8888,
     );
 
     await _controller!.initialize();
-    await _controller!.startImageStream((image) => _onCameraImage(image, onFrame));
+
+    // Attempt to set focus and exposure for optimal face capture
+    try {
+      await _controller!.setFocusMode(FocusMode.auto);
+      await _controller!.setExposureMode(ExposureMode.auto);
+    } catch (_) {
+      // Not all devices support manual focus/exposure control
+    }
+
+    await _controller!.startImageStream(
+      (image) => _onCameraImage(image, onFrame, config.frameThrottleMs),
+    );
   }
 
   void _onCameraImage(
     CameraImage image,
     Future<void> Function(CameraImage) onFrame,
+    int throttleMs,
   ) async {
     if (_controller == null || _isProcessingFrame) return;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    if (nowMs - _lastProcessedMs < _frameThrottleMs) return;
+    if (nowMs - _lastProcessedMs < throttleMs) return;
 
     _isProcessingFrame = true;
     _lastProcessedMs = nowMs;
 
     try {
-      // Await the async processing so the flag blocks concurrent calls
       await onFrame(image);
     } catch (e) {
       debugPrint('[CameraService] Frame error: $e');
@@ -58,9 +65,8 @@ class CameraService {
     }
   }
 
-  Future<List<CameraDescription>> getAvailableCameras() async {
-    return await availableCameras();
-  }
+  Future<List<CameraDescription>> getAvailableCameras() =>
+      availableCameras();
 
   Future<CameraDescription?> getFrontCamera() async {
     final cameras = await getAvailableCameras();
@@ -74,18 +80,12 @@ class CameraService {
   }
 
   Future<void> dispose() async {
-    // Grab and null the controller immediately so _onCameraImage callbacks bail out.
     final ctrl = _controller;
     _controller = null;
     _isProcessingFrame = false;
-
     if (ctrl == null) return;
     try {
-      if (ctrl.value.isStreamingImages) {
-        await ctrl.stopImageStream();
-      }
-      // Let in-flight frame callbacks drain before releasing the surface.
-      // 300ms is enough for one full ML Kit processing cycle on slow devices (Xiaomi MIUI).
+      if (ctrl.value.isStreamingImages) await ctrl.stopImageStream();
       await Future.delayed(const Duration(milliseconds: 300));
       await ctrl.dispose();
     } catch (e) {

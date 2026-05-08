@@ -1,73 +1,104 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
-import '../models/face_data.dart';
-import '../models/liveness_action.dart';
-import '../models/liveness_result.dart';
+
 import '../models/detection_status.dart';
+import '../models/face_data.dart';
+import '../models/frame_quality.dart';
+import '../models/liveness_action.dart';
+import '../models/liveness_config.dart';
+import '../models/liveness_result.dart';
 import '../ml/human_validator.dart';
+import '../camera/camera_validator.dart';
+import '../security/frame_hasher.dart';
+import '../security/session_manager.dart';
 import 'blink_detector.dart';
 import 'head_movement_detector.dart';
 
 /// Orchestrates all liveness checks and tracks challenge progress.
 ///
-/// Call [processFrame] on every detected face. The engine emits state changes
-/// via [onStatusChanged] and fires [onActionCompleted] / [onAllActionsCompleted]
-/// when the sequence is finished.
+/// Usage: call [processFrame] on every camera frame.
 class LivenessEngine extends ChangeNotifier {
   LivenessEngine({
     required List<LivenessAction> requiredActions,
+    required LivenessConfig config,
     this.onActionCompleted,
     this.onAllActionsCompleted,
     this.onStatusChanged,
-    this.sessionTimeoutMs = 60000,
-  })  : _requiredActions = List.unmodifiable(requiredActions),
-        _completedActions = [] {
-    _sessionStartMs = DateTime.now().millisecondsSinceEpoch;
+  })  : _config = config,
+        _cameraValidator = CameraValidator(config) {
+    _buildActionSequence(requiredActions);
   }
 
-  final List<LivenessAction> _requiredActions;
-  final List<LivenessAction> _completedActions;
+  final LivenessConfig _config;
+  final CameraValidator _cameraValidator;
 
   final HumanValidator _humanValidator = HumanValidator();
-  final BlinkDetector _blinkDetector = BlinkDetector();
-  final HeadMovementDetector _headMovementDetector = HeadMovementDetector();
+  final BlinkDetector _blinkDetector   = BlinkDetector();
+  final HeadMovementDetector _headDetector = HeadMovementDetector();
+  final FrameHasher _frameHasher  = FrameHasher();
+  final SessionManager _session   = SessionManager();
 
-  final void Function(LivenessAction action)? onActionCompleted;
-  final void Function(LivenessResult result)? onAllActionsCompleted;
-  final void Function(DetectionStatus status)? onStatusChanged;
-  final int sessionTimeoutMs;
+  List<LivenessAction> _sequence = [];
+  final List<LivenessAction> _completed = [];
 
-  late int _sessionStartMs;
-  DetectionStatus _status = DetectionStatus.initializing;
-  bool _isComplete = false;
   int _consecutiveNoFaceFrames = 0;
-  double _lastConfidenceScore = 0.0;
+  double _lastConfidenceScore  = 0.0;
+  bool _isComplete             = false;
+
   static const int _noFaceFrameLimit = 15;
 
-  DetectionStatus get status => _status;
-  List<LivenessAction> get completedActions => List.unmodifiable(_completedActions);
-  List<LivenessAction> get remainingActions {
-    return _requiredActions.where((a) => !_completedActions.contains(a)).toList();
-  }
+  final void Function(LivenessAction action)?   onActionCompleted;
+  final void Function(LivenessResult result)?   onAllActionsCompleted;
+  final void Function(DetectionStatus status)?  onStatusChanged;
 
+  DetectionStatus _status = DetectionStatus.initializing;
+
+  // ── Public getters ──────────────────────────────────────────────────────
+  String get sessionId        => _session.sessionId;
+  DetectionStatus get status  => _status;
+  List<LivenessAction> get completedActions => List.unmodifiable(_completed);
+  List<LivenessAction> get remainingActions =>
+      _sequence.where((a) => !_completed.contains(a)).toList();
   LivenessAction? get currentAction =>
       remainingActions.isNotEmpty ? remainingActions.first : null;
 
   double get progress =>
-      _requiredActions.isEmpty ? 1.0 : _completedActions.length / _requiredActions.length;
+      _sequence.isEmpty ? 1.0 : _completed.length / _sequence.length;
 
-  bool get isComplete => _isComplete;
+  int get totalActions => _sequence.length;
+  bool get isComplete  => _isComplete;
 
-  /// Main entry point called per camera frame.
-  void processFrame(List<FaceData> faces) {
+  // ── Frame processing ────────────────────────────────────────────────────
+
+  void processFrame(List<FaceData> faces, {FrameQuality? quality}) {
     if (_isComplete) return;
+    _session.incrementFrame();
+
     if (_checkTimeout()) return;
 
-    // Filter out background noise — only keep faces with meaningful size.
-    // minFaceSize=0.10 in ML Kit can still pick up posters/patterns; a 1.5%
-    // area threshold removes them without affecting real near/mid-range faces.
-    final significant = faces.where((f) => f.faceAreaRatio >= 0.015).toList();
+    // ── Duplicate / static-image detection ─────────────────────────────────
+    if (_config.enableDuplicateFrameDetection && quality != null) {
+      if (_frameHasher.isDuplicate(quality.frameHash)) {
+        _setStatus(DetectionStatus.fakeDetected);
+        return;
+      }
+    }
 
-    // --- No face ---
+    // ── Frame quality checks ───────────────────────────────────────────────
+    if (quality != null) {
+      final qualIssue = _cameraValidator.validateQuality(quality);
+      if (qualIssue != null) {
+        _setStatus(qualIssue);
+        return;
+      }
+    }
+
+    // ── Face count filter ──────────────────────────────────────────────────
+    final significant = faces
+        .where((f) => f.faceAreaRatio >= _config.faceTooFarRatio)
+        .toList();
+
     if (significant.isEmpty) {
       _consecutiveNoFaceFrames++;
       if (_consecutiveNoFaceFrames >= _noFaceFrameLimit) {
@@ -77,7 +108,6 @@ class LivenessEngine extends ChangeNotifier {
     }
     _consecutiveNoFaceFrames = 0;
 
-    // --- Multiple faces ---
     if (significant.length > 1) {
       _setStatus(DetectionStatus.multipleFaces);
       return;
@@ -85,38 +115,24 @@ class LivenessEngine extends ChangeNotifier {
 
     final face = significant.first;
 
-    // --- Distance checks ---
-    if (face.isFaceTooFar) {
-      _setStatus(DetectionStatus.faceTooFar);
-      return;
-    }
-    if (face.isFaceTooClose) {
-      _setStatus(DetectionStatus.faceTooClose);
+    // ── Face geometry checks ───────────────────────────────────────────────
+    final faceIssue = _cameraValidator.validateFace(face);
+    if (faceIssue != null) {
+      _setStatus(faceIssue);
       return;
     }
 
-    // --- Centering check ---
-    // normalizedBoundingBox is in raw camera image coords (landscape).
-    // BoxFit.cover crops the sides, so the visible center maps to roughly
-    // (0.5, 0.3–0.6) depending on device aspect ratio. Use generous tolerances
-    // so a face inside the oval guide never falsely triggers this check.
-    final norm = face.normalizedBoundingBox;
-    final cx = (norm.left + norm.right) / 2;
-    final cy = (norm.top + norm.bottom) / 2;
-    if (cx < 0.10 || cx > 0.90 || cy < 0.05 || cy > 0.95) {
-      _setStatus(DetectionStatus.faceNotCentered);
-      return;
+    // ── Anti-spoof ─────────────────────────────────────────────────────────
+    if (_config.enableAntiSpoof) {
+      final humanResult = _humanValidator.validate(face, quality: quality);
+      _lastConfidenceScore = humanResult.confidence;
+      if (!humanResult.isValid) {
+        _setStatus(DetectionStatus.fakeDetected);
+        return;
+      }
     }
 
-    // --- Human validation / anti-spoof ---
-    final humanResult = _humanValidator.validate(face);
-    _lastConfidenceScore = humanResult.confidence;
-    if (!humanResult.isValid) {
-      _setStatus(DetectionStatus.fakeDetected);
-      return;
-    }
-
-    // --- Process active liveness action ---
+    // ── Active liveness challenge ──────────────────────────────────────────
     final action = currentAction;
     if (action == null) return;
 
@@ -130,21 +146,20 @@ class LivenessEngine extends ChangeNotifier {
     switch (action) {
       case LivenessAction.blink:
         detected = _blinkDetector.process(face);
-        break;
       case LivenessAction.turnLeft:
       case LivenessAction.turnRight:
       case LivenessAction.lookUp:
       case LivenessAction.lookDown:
-        final moved = _headMovementDetector.process(face);
+        final moved = _headDetector.process(face);
         detected = moved == action;
-        break;
       case LivenessAction.smile:
         detected = face.smilingProbability > 0.80;
-        break;
+      case LivenessAction.openMouth:
+        detected = _detectMouthOpen(face);
     }
 
     if (detected) {
-      _completedActions.add(action);
+      _completed.add(action);
       onActionCompleted?.call(action);
       notifyListeners();
 
@@ -154,17 +169,35 @@ class LivenessEngine extends ChangeNotifier {
     }
   }
 
+  // ── Mouth open detection ────────────────────────────────────────────────
+  // ML Kit doesn't expose lip landmarks in basic mode.
+  // We approximate via bounding-box height growth and low smile probability.
+  double _prevFaceHeight = 0;
+  static const double _mouthOpenRatio = 1.08;
+
+  bool _detectMouthOpen(FaceData face) {
+    final h = face.boundingBox.height;
+    if (_prevFaceHeight == 0) {
+      _prevFaceHeight = h;
+      return false;
+    }
+    final grown = h / _prevFaceHeight;
+    _prevFaceHeight = h;
+    return grown > _mouthOpenRatio && face.smilingProbability < 0.3;
+  }
+
+  // ── Completion ──────────────────────────────────────────────────────────
+
   bool _checkTimeout() {
-    final elapsed = DateTime.now().millisecondsSinceEpoch - _sessionStartMs;
-    if (elapsed > sessionTimeoutMs) {
+    if (_session.isTimedOut(_config.sessionTimeoutMs)) {
       _isComplete = true;
+      _session.close();
       _setStatus(DetectionStatus.failed);
-      onAllActionsCompleted?.call(
-        LivenessResult.failure(
-          reason: 'Session timed out',
-          completedActions: List.from(_completedActions),
-        ),
-      );
+      onAllActionsCompleted?.call(LivenessResult.failure(
+        reason: 'Session timed out',
+        completedActions: List.from(_completed),
+        sessionId: _session.sessionId,
+      ));
       return true;
     }
     return false;
@@ -172,38 +205,59 @@ class LivenessEngine extends ChangeNotifier {
 
   void _complete() {
     _isComplete = true;
+    _session.close();
     _setStatus(DetectionStatus.completed);
-    final elapsed = DateTime.now().millisecondsSinceEpoch - _sessionStartMs;
-    onAllActionsCompleted?.call(
-      LivenessResult.success(
-        completedActions: List.from(_completedActions),
-        confidenceScore: _lastConfidenceScore,
-        sessionDurationMs: elapsed,
-      ),
-    );
+    onAllActionsCompleted?.call(LivenessResult.success(
+      completedActions: List.from(_completed),
+      confidenceScore: _lastConfidenceScore,
+      sessionDurationMs: _session.elapsedMs,
+      sessionId: _session.sessionId,
+    ));
   }
 
-  void _setStatus(DetectionStatus status) {
-    if (_status != status) {
-      _status = status;
-      onStatusChanged?.call(status);
+  void _setStatus(DetectionStatus s) {
+    if (_status != s) {
+      _status = s;
+      onStatusChanged?.call(s);
       notifyListeners();
     }
   }
 
-  void reset() {
-    _completedActions.clear();
+  void _buildActionSequence(List<LivenessAction> actions) {
+    final list = List<LivenessAction>.from(actions);
+    if (_config.randomizeActions) {
+      // Fisher-Yates shuffle for uniform random ordering
+      final rng = math.Random();
+      for (int i = list.length - 1; i > 0; i--) {
+        final j = rng.nextInt(i + 1);
+        final tmp = list[i];
+        list[i] = list[j];
+        list[j] = tmp;
+      }
+    }
+    _sequence = list;
+  }
+
+  // ── Reset ───────────────────────────────────────────────────────────────
+
+  void reset(List<LivenessAction> actions) {
+    _completed.clear();
     _isComplete = false;
     _consecutiveNoFaceFrames = 0;
-    _sessionStartMs = DateTime.now().millisecondsSinceEpoch;
+    _lastConfidenceScore = 0.0;
+    _prevFaceHeight = 0;
     _humanValidator.reset();
     _blinkDetector.reset();
-    _headMovementDetector.reset();
+    _headDetector.reset();
+    _frameHasher.reset();
+    _session.reset();
+    _buildActionSequence(actions);
     _setStatus(DetectionStatus.initializing);
   }
 
   @override
   void dispose() {
+    _session.close();
     super.dispose();
   }
 }
