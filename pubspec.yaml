@@ -4,7 +4,7 @@ description: >-
   liveness verification, and anti-spoof protection using Google ML Kit +
   TensorFlow Lite. Isolate-based ML processing, advanced anti-spoofing,
   frame-level security for KYC, banking, biometric auth, and enterprise apps.
-version: 2.0.0
+version: 2.1.0
 homepage: https://github.com/sanjaysharmajw/flutter_face_liveness
 repository: https://github.com/sanjaysharmajw/flutter_face_liveness
 issue_tracker: https://github.com/sanjaysharmajw/flutter_face_liveness/issues

@@ -1,3 +1,14 @@
+## 2.1.0
+
+### Improvements
+- Added banner image to README for pub.dev and GitHub documentation
+- Upgraded Android Gradle Plugin to 8.9.1 (required by `androidx.camera:1.6.0`)
+- Upgraded Gradle wrapper to 8.11.1
+- Updated `permission_handler` to `^12.0.1` (requires Flutter 3.24+ / Dart 3.5+)
+- Example app Face ID history screen — locally stores and displays all registered Face IDs with match/new status
+
+---
+
 ## 2.0.0
 
 ### New Features
