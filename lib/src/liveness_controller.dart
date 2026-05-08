@@ -42,9 +42,13 @@ class LivenessController extends ChangeNotifier {
   FrameQuality?  _lastQuality;
   RawFrameData?  _lastRawFrame;
   String?        _error;
+  double?        _faceIdModelDownloadProgress;
 
   // ── Public getters ──────────────────────────────────────────────────────
   bool            get isInitialized   => _isInitialized;
+  /// Non-null (0.0–1.0) while the FaceNet model is being downloaded for the
+  /// first time. Null when loading from cache or when download is complete.
+  double?         get faceIdModelDownloadProgress => _faceIdModelDownloadProgress;
   FaceData?       get currentFace     => _currentFace;
   FrameQuality?   get lastQuality     => _lastQuality;
   String?         get error           => _error;
@@ -78,12 +82,19 @@ class LivenessController extends ChangeNotifier {
         await _tflite!.load();
       }
 
-      // MobileFaceNet face identity (optional)
+      // FaceNet face identity — auto-downloads model on first run (optional)
       if (_config.enableFaceId) {
         _faceIdentity = FaceIdentityService(
           similarityThreshold: _config.faceIdSimilarityThreshold,
         );
-        await _faceIdentity!.initialize();
+        await _faceIdentity!.initialize(
+          onModelDownloadProgress: (p) {
+            _faceIdModelDownloadProgress = p;
+            notifyListeners();
+          },
+        );
+        _faceIdModelDownloadProgress = null;
+        notifyListeners();
       }
 
       _engine = LivenessEngine(

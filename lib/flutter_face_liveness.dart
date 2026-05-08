@@ -39,4 +39,5 @@ export 'src/security/session_manager.dart' show SessionManager;
 
 // Face identity
 export 'src/identity/face_identity_service.dart' show FaceIdentityService;
-export 'src/ml/face_detector_service.dart' show RawFrameData;
+export 'src/identity/face_model_downloader.dart'  show FaceModelDownloader, FaceModelDownloadException;
+export 'src/ml/face_detector_service.dart'        show RawFrameData;

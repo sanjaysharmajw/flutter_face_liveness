@@ -56,3 +56,4 @@ local.properties
 *.dill
 *.dSYM.zip
 *.dSYM
+assets/models/mobile_face_net.tflite

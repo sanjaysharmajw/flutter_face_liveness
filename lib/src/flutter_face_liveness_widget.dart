@@ -100,29 +100,47 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
   // ── Loading ─────────────────────────────────────────────────────────────
 
   Widget _loadingView() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              color: _isDark ? const Color(0xFF4F6BF4) : const Color(0xFF4F6BF4),
-            ),
+    return Consumer<LivenessController>(
+      builder: (_, ctrl, __) {
+        final dlProgress = ctrl.faceIdModelDownloadProgress;
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  value: dlProgress,
+                  color: const Color(0xFF4F6BF4),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                dlProgress != null
+                    ? 'Downloading Face ID model… ${(dlProgress * 100).toInt()}%'
+                    : 'Starting camera…',
+                style: TextStyle(
+                  color: _isDark ? Colors.white54 : Colors.black45,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (dlProgress != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'One-time download (~23 MB)',
+                  style: TextStyle(
+                    color: _isDark ? Colors.white30 : Colors.black26,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 20),
-          Text(
-            'Starting camera…',
-            style: TextStyle(
-              color: _isDark ? Colors.white54 : Colors.black45,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 

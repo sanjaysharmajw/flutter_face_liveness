@@ -31,8 +31,12 @@ class FaceIdentityService {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  Future<void> initialize() async {
-    await _model.load();
+  /// [onModelDownloadProgress] fires 0.0–1.0 while the model is being
+  /// downloaded for the first time (null on subsequent runs from cache).
+  Future<void> initialize({
+    void Function(double progress)? onModelDownloadProgress,
+  }) async {
+    await _model.load(onProgress: onModelDownloadProgress);
     await _loadStoredFaces();
   }
 

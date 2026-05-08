@@ -8,7 +8,8 @@ import 'package:flutter/foundation.dart';
 /// a 112×112 Float32 RGB tensor (values in [-1, 1]) suitable as
 /// MobileFaceNet input.
 class FacePreprocessor {
-  static const int targetSize = 112;
+  // FaceNet expects 160×160 input
+  static const int targetSize = 160;
 
   /// Returns a [Float32List] of length `112 * 112 * 3`, or `null` on error.
   ///
