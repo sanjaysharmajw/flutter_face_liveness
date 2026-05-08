@@ -1,4 +1,4 @@
-## 2.1.0
+## 2.2.0
 
 ### Improvements
 - Added banner image to README for pub.dev and GitHub documentation
