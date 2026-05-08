@@ -51,14 +51,16 @@ class LivenessController extends ChangeNotifier {
       _isInitialized ? _engine.status : DetectionStatus.initializing;
   LivenessAction? get currentAction  =>
       _isInitialized ? _engine.currentAction : null;
-  List<LivenessAction> get sequence  =>
-      _isInitialized ? _engine._sequence : _actions;
-  double  get progress       => _isInitialized ? _engine.progress      : 0.0;
-  int     get completedCount => _isInitialized ? _engine.completedActions.length : 0;
-  int     get totalActions   => _actions.length;
-  bool    get isComplete     => _isInitialized && _engine.isComplete;
-  String? get sessionId      => _isInitialized ? _engine.sessionId : null;
-  LivenessConfig get config  => _config;
+  double  get progress          => _isInitialized ? _engine.progress             : 0.0;
+  int     get completedCount    => _isInitialized ? _engine.completedActions.length : 0;
+  int     get totalActions      => _actions.length;
+  bool    get isComplete        => _isInitialized && _engine.isComplete;
+  String? get sessionId         => _isInitialized ? _engine.sessionId           : null;
+  LivenessConfig get config     => _config;
+  List<LivenessAction> get completedActions =>
+      _isInitialized ? _engine.completedActions : const [];
+  List<LivenessAction> get remainingActions =>
+      _isInitialized ? _engine.remainingActions : _actions;
 
   // ── Initialisation ──────────────────────────────────────────────────────
 
@@ -155,9 +157,3 @@ class LivenessController extends ChangeNotifier {
   }
 }
 
-// Allow reading internal sequence for UI purposes
-extension _EngineSequence on LivenessEngine {
-  List<LivenessAction> get _sequence => super.remainingActions.isEmpty
-      ? completedActions
-      : [...completedActions, ...remainingActions];
-}
