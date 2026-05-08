@@ -795,6 +795,6 @@ MIT — see [LICENSE](LICENSE)
 
 ## Author
 
-Developed by [Cerise Tech Solutions](https://cerisetechsolutions.com)  
+Developed by Sanjay Sharma 
 GitHub: [sanjaysharmajw/flutter_face_liveness](https://github.com/sanjaysharmajw/flutter_face_liveness)  
 Issues: [github.com/sanjaysharmajw/flutter_face_liveness/issues](https://github.com/sanjaysharmajw/flutter_face_liveness/issues)
