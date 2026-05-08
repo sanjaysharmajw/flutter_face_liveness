@@ -30,7 +30,7 @@ android {
 
     defaultConfig {
         applicationId "com.cerisetechsolutions.flutter_face_liveness_example"
-        minSdk flutter.minSdkVersion
+        minSdk 26
         targetSdk flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName

@@ -42,11 +42,15 @@ class LivenessEngine extends ChangeNotifier {
   List<LivenessAction> _sequence = [];
   final List<LivenessAction> _completed = [];
 
-  int _consecutiveNoFaceFrames = 0;
-  double _lastConfidenceScore  = 0.0;
-  bool _isComplete             = false;
+  int _consecutiveNoFaceFrames    = 0;
+  int _consecutiveBadLightFrames  = 0;
+  double _lastConfidenceScore     = 0.0;
+  bool _isComplete                = false;
 
-  static const int _noFaceFrameLimit = 15;
+  static const int _noFaceFrameLimit   = 15;
+  // Camera auto-exposure needs ~5 frames to settle on startup.
+  // Only report low/over light after this many consecutive bad-quality frames.
+  static const int _badLightFrameLimit = 6;
 
   final void Function(LivenessAction action)?   onActionCompleted;
   final void Function(LivenessResult result)?   onAllActionsCompleted;
@@ -88,6 +92,17 @@ class LivenessEngine extends ChangeNotifier {
     // ── Frame quality checks ───────────────────────────────────────────────
     if (quality != null) {
       final qualIssue = _cameraValidator.validateQuality(quality);
+      if (qualIssue == DetectionStatus.lowLight ||
+          qualIssue == DetectionStatus.overExposed) {
+        // Debounce: camera auto-exposure takes several frames to settle.
+        // Only block on persistent bad lighting, not a transient dark frame.
+        _consecutiveBadLightFrames++;
+        if (_consecutiveBadLightFrames >= _badLightFrameLimit) {
+          _setStatus(qualIssue!);
+        }
+        return;
+      }
+      _consecutiveBadLightFrames = 0;
       if (qualIssue != null) {
         _setStatus(qualIssue);
         return;
@@ -243,7 +258,8 @@ class LivenessEngine extends ChangeNotifier {
   void reset(List<LivenessAction> actions) {
     _completed.clear();
     _isComplete = false;
-    _consecutiveNoFaceFrames = 0;
+    _consecutiveNoFaceFrames   = 0;
+    _consecutiveBadLightFrames = 0;
     _lastConfidenceScore = 0.0;
     _prevFaceHeight = 0;
     _humanValidator.reset();

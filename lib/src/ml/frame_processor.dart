@@ -74,31 +74,61 @@ ProcessedFrame _processFrame(_FrameInput input) {
     }
   }
 
-  // ── Step 2: Compute brightness (average Y) ───────────────────────────────
-  // Sub-sample every 8th pixel of the Y-plane for speed.
-  final yLen = width * height;
-  int ySum = 0;
-  int ySamples = 0;
-  const yStep = 8;
-  for (int i = 0; i < yLen; i += yStep) {
-    ySum += nv21[i];
-    ySamples++;
-  }
-  final brightness = (ySamples > 0) ? (ySum / ySamples) / 255.0 : 0.5;
+  // ── Step 2 & 3: Brightness + blur score ─────────────────────────────────
+  // Android NV21 : Y plane (first width*height bytes) is already luminance.
+  // iOS BGRA8888 : single plane with layout [B,G,R,A] per pixel — must
+  //               compute BT.601 luminance manually to get correct brightness.
+  const sampleStep = 8; // sample every 8th pixel for speed
+  final pixelCount = width * height;
+  double brightness;
+  double blurScore;
 
-  // ── Step 3: Compute blur score (Y-plane variance on sub-sample) ──────────
-  // We compute mean + variance on the same sub-sample.
-  double yMean = ySum / ySamples;
-  double yVarSum = 0.0;
-  for (int i = 0; i < yLen; i += yStep) {
-    final diff = nv21[i] - yMean;
-    yVarSum += diff * diff;
-  }
-  final blurScore = ySamples > 0 ? yVarSum / ySamples : 0.0;
+  if (input.isSinglePlane) {
+    // ── iOS BGRA8888 ──────────────────────────────────────────────────────
+    int lumaSum = 0;
+    int lumaSamples = 0;
+    for (int p = 0; p < pixelCount; p += sampleStep) {
+      final base = p * 4;
+      if (base + 2 >= nv21.length) break;
+      // BT.601: Y = (77*R + 150*G + 29*B) >> 8  (integer, avoids floats)
+      lumaSum += (77 * nv21[base + 2] + 150 * nv21[base + 1] + 29 * nv21[base]) >> 8;
+      lumaSamples++;
+    }
+    brightness = lumaSamples > 0 ? (lumaSum / lumaSamples) / 255.0 : 0.5;
 
-  // ── Step 4: Frame hash (FNV-1a on every 16th Y byte) ────────────────────
+    final lumaMean = lumaSamples > 0 ? lumaSum / lumaSamples : 127.0;
+    double varSum = 0.0;
+    for (int p = 0; p < pixelCount; p += sampleStep) {
+      final base = p * 4;
+      if (base + 2 >= nv21.length) break;
+      final luma = (77 * nv21[base + 2] + 150 * nv21[base + 1] + 29 * nv21[base]) >> 8;
+      final diff = luma - lumaMean;
+      varSum += diff * diff;
+    }
+    blurScore = lumaSamples > 0 ? varSum / lumaSamples : 0.0;
+  } else {
+    // ── Android NV21 ─────────────────────────────────────────────────────
+    int ySum = 0;
+    int ySamples = 0;
+    for (int i = 0; i < pixelCount; i += sampleStep) {
+      ySum += nv21[i];
+      ySamples++;
+    }
+    brightness = ySamples > 0 ? (ySum / ySamples) / 255.0 : 0.5;
+
+    final yMean = ySamples > 0 ? ySum / ySamples : 127.0;
+    double yVarSum = 0.0;
+    for (int i = 0; i < pixelCount; i += sampleStep) {
+      final diff = nv21[i] - yMean;
+      yVarSum += diff * diff;
+    }
+    blurScore = ySamples > 0 ? yVarSum / ySamples : 0.0;
+  }
+
+  // ── Step 4: Frame hash (FNV-1a on every 16th pixel) ────────────────────
   int hash = 0x811c9dc5;
-  for (int i = 0; i < yLen; i += 16) {
+  final hashStride = input.isSinglePlane ? 64 : 16; // BGRA=4 bytes/pixel
+  for (int i = 0; i < nv21.length; i += hashStride) {
     hash ^= nv21[i];
     hash = (hash * 0x01000193) & 0xFFFFFFFF;
   }

@@ -10,14 +10,17 @@ import '../models/frame_quality.dart';
 import 'frame_processor.dart';
 
 /// Raw frame metadata forwarded to FaceIdentityService when enableFaceId is on.
+///
+/// [imageBytes] contains NV21 bytes on Android, BGRA8888 bytes on iOS —
+/// matching exactly what [FacePreprocessor.prepare] expects for each platform.
 class RawFrameData {
   const RawFrameData({
-    required this.nv21Bytes,
+    required this.imageBytes,
     required this.imageWidth,
     required this.imageHeight,
     required this.sensorOrientation,
   });
-  final Uint8List nv21Bytes;
+  final Uint8List imageBytes;
   final int imageWidth;
   final int imageHeight;
   final int sensorOrientation;
@@ -106,9 +109,14 @@ class FaceDetectorService {
           .map((f) => FaceData.fromFace(f, imageSize))
           .toList();
 
+      // iOS camera provides BGRA8888; Android provides NV21 (via FrameProcessor).
+      // FacePreprocessor.prepare() branches on Platform.isIOS so the bytes must
+      // match what each platform branch expects.
       final rawFrame = captureRawFrame
           ? RawFrameData(
-              nv21Bytes:         processed.nv21Bytes,
+              imageBytes: Platform.isIOS
+                  ? image.planes[0].bytes   // original BGRA8888 from iOS camera
+                  : processed.nv21Bytes,    // NV21 converted by FrameProcessor
               imageWidth:        image.width,
               imageHeight:       image.height,
               sensorOrientation: sensorOrientation,

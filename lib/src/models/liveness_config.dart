@@ -22,8 +22,8 @@ class LivenessConfig {
     // ── Frame quality ────────────────────────────────────────────────────
     this.enableBrightnessCheck = true,
     this.enableBlurDetection = true,
-    this.brightnessMin = 0.20,
-    this.brightnessMax = 0.90,
+    this.brightnessMin = 0.12,
+    this.brightnessMax = 0.92,
     this.blurThreshold = 80.0,
 
     // ── TFLite (optional) ────────────────────────────────────────────────
@@ -41,7 +41,7 @@ class LivenessConfig {
 
     // ── Face Identity ────────────────────────────────────────────────────
     this.enableFaceId = false,
-    this.faceIdSimilarityThreshold = 0.78,
+    this.faceIdSimilarityThreshold = 0.65,
 
     // ── UI ───────────────────────────────────────────────────────────────
     this.themeMode = ThemeMode.dark,

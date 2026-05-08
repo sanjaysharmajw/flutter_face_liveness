@@ -13,8 +13,8 @@ class FrameQuality {
   });
 
   /// Average Y-plane luminance, normalised to [0.0, 1.0].
-  ///   < 0.20 → low light
-  ///   > 0.90 → over-exposed
+  ///   < 0.12 → genuinely dark room
+  ///   > 0.92 → over-exposed / direct sun
   final double brightness;
 
   /// Variance of Y-plane pixel values on a sub-sampled grid.
@@ -25,8 +25,8 @@ class FrameQuality {
   /// Used for duplicate / static-image detection.
   final int frameHash;
 
-  bool get isTooDark => brightness < 0.20;
-  bool get isOverExposed => brightness > 0.90;
+  bool get isTooDark => brightness < 0.12;
+  bool get isOverExposed => brightness > 0.92;
   bool get isBlurry => blurScore < 80.0;
 
   @override

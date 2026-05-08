@@ -81,11 +81,9 @@ class TFLiteService {
       }
 
       // Shape: [1, inputSize, inputSize, 3]
-      final inputTensor  = [input.reshape([inputSize, inputSize, 3])];
       final outputTensor = [List.filled(2, 0.0)];
 
-      // _interpreter.run(inputTensor, outputTensor);
-      // ^ Uncomment when tflite_flutter is added to pubspec.yaml
+      // _interpreter.run([input.reshape([inputSize, inputSize, 3])], outputTensor);
 
       return _parseOutput(outputTensor[0] as List<double>);
     } catch (e) {

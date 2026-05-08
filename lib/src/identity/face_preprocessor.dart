@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
@@ -42,20 +43,20 @@ class FacePreprocessor {
     Uint8List bytes, int w, int h, Rect bbox,
   ) {
     final r = _padBbox(bbox, w.toDouble(), h.toDouble());
-    return _resampleBgra(bytes, w, r);
+    return _resampleBgra(bytes, w, h, r);
   }
 
-  static Float32List _resampleBgra(Uint8List bytes, int w, Rect crop) {
+  static Float32List _resampleBgra(Uint8List bytes, int w, int h, Rect crop) {
     final out = Float32List(targetSize * targetSize * 3);
     int i = 0;
     final x0 = crop.left.toInt().clamp(0, w - 1);
-    final y0 = crop.top.toInt().clamp(0, w - 1);
+    final y0 = crop.top.toInt().clamp(0, h - 1);
     final cw = crop.width.toInt().clamp(1, w - x0);
-    final ch = crop.height.toInt().clamp(1, w - y0);
+    final ch = crop.height.toInt().clamp(1, h - y0);
     for (int dy = 0; dy < targetSize; dy++) {
       for (int dx = 0; dx < targetSize; dx++) {
         final sx = (x0 + dx * cw ~/ targetSize).clamp(0, w - 1);
-        final sy = (y0 + dy * ch ~/ targetSize).clamp(0, w - 1);
+        final sy = (y0 + dy * ch ~/ targetSize).clamp(0, h - 1);
         final p  = (sy * w + sx) * 4;
         out[i++] = (bytes[p + 2] / 128.0) - 1.0; // R
         out[i++] = (bytes[p + 1] / 128.0) - 1.0; // G

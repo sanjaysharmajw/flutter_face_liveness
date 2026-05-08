@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,14 +17,23 @@ import 'face_preprocessor.dart';
 ///
 /// Enable with [LivenessConfig.enableFaceId].
 class FaceIdentityService {
-  FaceIdentityService({this.similarityThreshold = 0.78});
+  FaceIdentityService({this.similarityThreshold = 0.65});
 
-  /// Cosine-similarity cutoff: 0.78 works well for MobileFaceNet 128-dim embeddings.
-  /// Raise for stricter matching, lower to be more lenient.
+  /// Cosine-similarity cutoff for matching the same face.
+  /// 0.65 balances recall (same person in different conditions) vs
+  /// precision (reject different people). Raise toward 0.80 for stricter
+  /// matching, lower toward 0.50 to be more lenient.
   final double similarityThreshold;
 
   final FaceEmbeddingModel _model = FaceEmbeddingModel();
+
+  // Each face stores up to [_maxEmbeddingsPerFace] embeddings (running mean).
+  // The stored value is the L2-normalised average, so matching stays O(1).
   final Map<String, List<double>> _knownFaces = {};
+
+  // How aggressively the stored embedding adapts toward new observations.
+  // 0.25 = new sample has 25% weight; proven stable for gradual lighting drift.
+  static const double _embeddingUpdateRate = 0.25;
 
   static const _kPrefsKey = 'ffl_known_faces_v1';
 
@@ -107,6 +117,14 @@ class FaceIdentityService {
 
     if (bestId != null && bestSim >= similarityThreshold) {
       debugPrint('[FaceIdentityService] Matched $bestId (sim=${bestSim.toStringAsFixed(3)})');
+      // Update stored embedding toward the new observation so the face
+      // template gradually adapts to lighting / pose changes.
+      _knownFaces[bestId] = _blendEmbeddings(
+        _knownFaces[bestId]!,
+        embedding,
+        _embeddingUpdateRate,
+      );
+      await _flushToPrefs();
       return bestId;
     }
 
@@ -116,6 +134,24 @@ class FaceIdentityService {
     await _flushToPrefs();
     debugPrint('[FaceIdentityService] New face registered → $faceId');
     return faceId;
+  }
+
+  /// Weighted blend: `(1-rate)*stored + rate*newEmbedding`, then L2-renormalise.
+  static List<double> _blendEmbeddings(
+    List<double> stored,
+    List<double> incoming,
+    double rate,
+  ) {
+    final blended = List<double>.generate(
+      stored.length,
+      (i) => (1 - rate) * stored[i] + rate * incoming[i],
+    );
+    // Re-normalise so cosine similarity stays valid
+    double norm = 0.0;
+    for (final v in blended) norm += v * v;
+    norm = math.sqrt(norm);
+    if (norm < 1e-10) return stored;
+    return blended.map((v) => v / norm).toList();
   }
 
   // ── Storage ───────────────────────────────────────────────────────────────

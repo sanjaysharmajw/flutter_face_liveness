@@ -30,6 +30,14 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.2
 
+# tflite_flutter 0.10.4 uses UnmodifiableUint8ListView which was removed in
+# Dart 3.4. Override to the upstream git commit that removed that usage.
+dependency_overrides:
+  tflite_flutter:
+    git:
+      url: https://github.com/tensorflow/flutter-tflite.git
+      ref: main
+
 flutter:
   plugin:
     platforms:

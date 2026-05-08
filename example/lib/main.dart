@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_face_liveness/flutter_face_liveness.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,6 +62,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late final AnimationController _pulseCtrl =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))
         ..repeat(reverse: true);
+
+  List<String> _registeredFaceIds = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFaceIds();
+  }
+
+  Future<void> _loadFaceIds() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final json  = prefs.getString('ffl_known_faces_v1');
+      if (json == null || !mounted) return;
+      final Map<String, dynamic> decoded =
+          Map<String, dynamic>.from(await Future.value(
+              (json.isNotEmpty) ? _decodeJson(json) : {}));
+      setState(() => _registeredFaceIds = decoded.keys.toList());
+    } catch (_) {}
+  }
+
+  Map<String, dynamic> _decodeJson(String s) {
+    // lightweight JSON key extraction — avoids importing dart:convert
+    final reg = RegExp(r'"(FID-[A-F0-9]+)"');
+    final ids  = reg.allMatches(s).map((m) => m.group(1)!).toList();
+    return {for (final id in ids) id: []};
+  }
 
   @override
   void dispose() {
@@ -167,6 +195,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ],
                   ),
                 ),
+                if (_registeredFaceIds.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: _FaceIdHistoryCard(
+                      faceIds: _registeredFaceIds,
+                      onClear: () async {
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.remove('ffl_known_faces_v1');
+                        if (mounted) setState(() => _registeredFaceIds = []);
+                      },
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -210,6 +252,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       actions: [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
     )));
+    // Refresh face ID list after returning from liveness screen
+    if (mounted) _loadFaceIds();
   }
 
   void _showPermissionSheet(BuildContext ctx) {
@@ -496,12 +540,7 @@ class _StatsCard extends StatelessWidget {
           ),
           if (result.faceId != null) ...[
             _divider(),
-            _StatTile(
-              icon: Icons.face_rounded,
-              label: 'Face ID (Persistent)',
-              value: result.faceId!,
-              accent: _success,
-            ),
+            _CopyableFaceIdTile(faceId: result.faceId!),
           ],
           if (result.sessionId != null) ...[
             _divider(),
@@ -528,6 +567,65 @@ class _StatsCard extends StatelessWidget {
 
   Widget _divider() => const Divider(
       color: Color(0xFFE2E8F0), height: 1, indent: 20, endIndent: 20);
+}
+
+class _CopyableFaceIdTile extends StatelessWidget {
+  const _CopyableFaceIdTile({required this.faceId});
+  final String faceId;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Clipboard.setData(ClipboardData(text: faceId));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Face ID copied to clipboard'),
+            duration: Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: _success,
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: _success.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: const Icon(Icons.face_rounded, color: _success, size: 17),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Face ID  (tap to copy)',
+                      style: TextStyle(color: _textSecondary, fontSize: 11)),
+                  const SizedBox(height: 2),
+                  Text(
+                    faceId,
+                    style: const TextStyle(
+                      color: _textPrimary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.copy_rounded, color: _textSecondary, size: 14),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _StatTile extends StatelessWidget {
@@ -904,6 +1002,118 @@ class _FaceHeroPainter extends CustomPainter {
   @override
   bool shouldRepaint(_FaceHeroPainter old) =>
       old.scan != scan || old.pulse != pulse;
+}
+
+// ─────────────────────────────────────────────
+// Face ID History Card  (home screen)
+// ─────────────────────────────────────────────
+
+class _FaceIdHistoryCard extends StatelessWidget {
+  const _FaceIdHistoryCard({required this.faceIds, required this.onClear});
+  final List<String> faceIds;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _success.withOpacity(0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: _success.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: _success.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.face_rounded, color: _success, size: 16),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Registered Faces (${faceIds.length})',
+                style: const TextStyle(
+                  color: _textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: onClear,
+                child: Text(
+                  'Clear all',
+                  style: TextStyle(
+                    color: _error.withOpacity(0.7),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...faceIds.map((id) => _FaceIdRow(faceId: id)),
+        ],
+      ),
+    );
+  }
+}
+
+class _FaceIdRow extends StatelessWidget {
+  const _FaceIdRow({required this.faceId});
+  final String faceId;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Clipboard.setData(ClipboardData(text: faceId));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Copied: $faceId'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: _success,
+          ),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: [
+            const Icon(Icons.fingerprint_rounded, color: _success, size: 14),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                faceId,
+                style: const TextStyle(
+                  color: _textSecondary,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            const Icon(Icons.copy_rounded, color: _textSecondary, size: 13),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 PageRouteBuilder _fade(Widget page) => PageRouteBuilder(
