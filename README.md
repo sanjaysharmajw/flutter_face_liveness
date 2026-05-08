@@ -632,50 +632,6 @@ The package includes a plug-in interface for a custom deepfake / presentation-at
    },
    ```
 
----
-
-## Architecture
-
-```
-FlutterFaceLiveness (Widget)
-    └── LivenessController (ChangeNotifier)
-            │
-            ├── Camera Layer
-            │       ├── CameraService        — camera lifecycle, frame streaming, targetFps throttling
-            │       └── CameraValidator      — distance, centering, geometry checks
-            │
-            ├── ML Layer
-            │       ├── FaceDetectorService  — Google ML Kit face detection
-            │       │       └── RawFrameData — platform-correct bytes (NV21/BGRA) for Face ID
-            │       └── FrameProcessor       — compute() isolate
-            │               ├── YUV → NV21 conversion (Android) / BGRA pass-through (iOS)
-            │               ├── BT.601 brightness: (77R+150G+29B)>>8 on iOS BGRA,
-            │               │                      Y-plane average on Android NV21
-            │               ├── Y-plane blur score (variance)
-            │               └── FNV-1a frame hash
-            │
-            ├── Liveness Layer
-            │       ├── LivenessEngine       — action sequencing, session lifecycle
-            │       │       └── 6-frame debounce for brightness/overexposure checks
-            │       ├── BlinkDetector        — open→close→open eye state machine
-            │       ├── HeadMovementDetector — Euler angle threshold + hold timer
-            │       └── SessionManager       — Random.secure() session ID + timeout
-            │
-            ├── Security Layer
-            │       ├── AntiSpoofEngine      — 7-signal composite (12-frame rolling window)
-            │       ├── FrameHasher          — FNV-1a sliding-window duplicate detection
-            │       └── TFLiteService        — optional custom deepfake model
-            │
-            └── Face Identity Layer (optional, enableFaceId: true)
-                    ├── FaceIdentityService  — cosine matching + SharedPreferences persistence
-                    │       └── Embedding blending: 0.75×stored + 0.25×new (re-normalised)
-                    ├── FaceEmbeddingModel   — FaceNet TFLite (128-dim L2-normalised embeddings)
-                    ├── FacePreprocessor     — face crop → 160×160 → [-1,1] normalise (isolate)
-                    └── FaceModelDownloader  — streaming HTTP, primary + fallback URL, cache validation
-```
-
----
-
 ## Performance
 
 | Metric | Value |
