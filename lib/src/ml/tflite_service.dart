@@ -85,7 +85,7 @@ class TFLiteService {
 
       // _interpreter.run([input.reshape([inputSize, inputSize, 3])], outputTensor);
 
-      return _parseOutput(outputTensor[0] as List<double>);
+      return _parseOutput(outputTensor[0]);
     } catch (e) {
       debugPrint('[TFLiteService] Inference error: $e');
       return null;
@@ -110,9 +110,4 @@ class TFLiteService {
     _interpreter = null;
     _isLoaded = false;
   }
-}
-
-// Minimal reshape extension for demo purposes
-extension _Float32Reshape on Float32List {
-  dynamic reshape(List<int> shape) => this; // actual reshape done by tflite_flutter
 }
