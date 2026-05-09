@@ -169,7 +169,7 @@ onSuccess: (result) {
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^2.0.0
+  flutter_face_liveness: ^2.4.0
 ```
 
 ### 2. Platform permissions

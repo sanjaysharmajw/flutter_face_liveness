@@ -51,7 +51,7 @@ class FaceModelDownloader {
     }
 
     if (!await _isValid(file)) {
-      throw FaceModelDownloadException(
+      throw const FaceModelDownloadException(
         'Failed to download the FaceNet model from both primary and fallback URLs.\n'
         'Check your internet connection and try again.',
       );

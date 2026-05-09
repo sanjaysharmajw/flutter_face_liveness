@@ -17,12 +17,12 @@ class StatusIndicatorWidget extends StatelessWidget {
         key: ValueKey(status),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.60),
+          color: Colors.black.withValues(alpha:0.60),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: color.withOpacity(0.40)),
+          border: Border.all(color: color.withValues(alpha:0.40)),
           boxShadow: [
             BoxShadow(
-                color: color.withOpacity(0.22), blurRadius: 12, spreadRadius: 0),
+                color: color.withValues(alpha:0.22), blurRadius: 12, spreadRadius: 0),
           ],
         ),
         child: Row(

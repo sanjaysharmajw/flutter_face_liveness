@@ -27,13 +27,13 @@ class LivenessInstructionsWidget extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: isDark
-              ? Colors.black.withOpacity(0.60)
-              : Colors.white.withOpacity(0.90),
+              ? Colors.black.withValues(alpha:0.60)
+              : Colors.white.withValues(alpha:0.90),
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
             color: isDark
-                ? Colors.white.withOpacity(0.08)
-                : Colors.black.withOpacity(0.06),
+                ? Colors.white.withValues(alpha:0.08)
+                : Colors.black.withValues(alpha:0.06),
           ),
         ),
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
@@ -130,7 +130,7 @@ class _ProgressBar extends StatelessWidget {
               value: v,
               minHeight: 5,
               backgroundColor:
-                  isDark ? Colors.white12 : Colors.black.withOpacity(0.08),
+                  isDark ? Colors.white12 : Colors.black.withValues(alpha:0.08),
               valueColor: AlwaysStoppedAnimation<Color>(trackColor),
             ),
           ),
@@ -156,9 +156,9 @@ class _InstructionRow extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
+            color: color.withValues(alpha:0.12),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.22)),
+            border: Border.all(color: color.withValues(alpha:0.22)),
           ),
           child: Center(
             child: Text(emoji, style: const TextStyle(fontSize: 22)),

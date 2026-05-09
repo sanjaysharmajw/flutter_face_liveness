@@ -56,7 +56,7 @@ class AntiSpoofEngine {
 
     // Allow early frames through while history builds
     if (_frameCount <= _warmupFrames) {
-      return AntiSpoofResult(
+      return const AntiSpoofResult(
         isReal: true,
         confidence: 0.65,
         signalScores: {'warmup': 1.0},

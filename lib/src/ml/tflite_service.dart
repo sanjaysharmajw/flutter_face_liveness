@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 
 /// Result from TFLite model inference.

@@ -158,9 +158,9 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
               height: 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFFEF4444).withOpacity(0.1),
+                color: const Color(0xFFEF4444).withValues(alpha: 0.1),
                 border: Border.all(
-                    color: const Color(0xFFEF4444).withOpacity(0.4)),
+                    color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
               ),
               child: const Icon(Icons.error_outline_rounded,
                   color: Color(0xFFEF4444), size: 40),
@@ -294,7 +294,7 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
         decoration: BoxDecoration(
           gradient: RadialGradient(
             colors: [
-              const Color(0xFF10B981).withOpacity(0.18),
+              const Color(0xFF10B981).withValues(alpha:0.18),
               Colors.transparent,
             ],
           ),
@@ -318,7 +318,7 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.65),
+          color: Colors.black.withValues(alpha:0.65),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(

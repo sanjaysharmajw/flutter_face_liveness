@@ -39,7 +39,7 @@ class FaceOverlayPainter extends CustomPainter {
     canvas.drawPath(
       path,
       Paint()
-        ..color = Colors.black.withOpacity(isDark ? 0.62 : 0.45)
+        ..color = Colors.black.withValues(alpha:isDark ? 0.62 : 0.45)
         ..style = PaintingStyle.fill,
     );
   }
@@ -52,7 +52,7 @@ class FaceOverlayPainter extends CustomPainter {
     canvas.drawOval(
       oval.inflate(expand),
       Paint()
-        ..color = _borderColor().withOpacity(opacity)
+        ..color = _borderColor().withValues(alpha:opacity)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
@@ -66,9 +66,9 @@ class FaceOverlayPainter extends CustomPainter {
     // Rotating sweep gradient gives a shimmer/scanning feel
     final shader = SweepGradient(
       colors: [
-        color.withOpacity(0.9),
-        color.withOpacity(0.3),
-        color.withOpacity(0.9),
+        color.withValues(alpha:0.9),
+        color.withValues(alpha:0.3),
+        color.withValues(alpha:0.9),
       ],
       stops: const [0.0, 0.5, 1.0],
       transform: GradientRotation(animationValue * math.pi * 2),

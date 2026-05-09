@@ -112,7 +112,7 @@ class _StepDotState extends State<_StepDot>
                 shape: BoxShape.circle,
                 color: color,
                 boxShadow: widget.active
-                    ? [BoxShadow(color: activeColor.withOpacity(0.5), blurRadius: 6)]
+                    ? [BoxShadow(color: activeColor.withValues(alpha:0.5), blurRadius: 6)]
                     : [],
               ),
               child: widget.done

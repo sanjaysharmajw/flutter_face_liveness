@@ -214,12 +214,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.lock_outline, size: 11, color: _textSecondary.withOpacity(0.5)),
+                    Icon(Icons.lock_outline, size: 11, color: _textSecondary.withValues(alpha:0.5)),
                     const SizedBox(width: 5),
                     Text(
                       'On-device · No data stored or transmitted',
                       style: TextStyle(
-                          color: _textSecondary.withOpacity(0.5), fontSize: 11),
+                          color: _textSecondary.withValues(alpha:0.5), fontSize: 11),
                     ),
                   ],
                 ),
@@ -250,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(LivenessScreen(
+    await Navigator.of(ctx).push(_fade(const LivenessScreen(
       actions: [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
     )));
@@ -283,7 +283,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: _primary.withOpacity(0.1),
+                color: _primary.withValues(alpha:0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.camera_alt_outlined, color: _primary, size: 30),
@@ -482,10 +482,10 @@ class _ResultBadge extends StatelessWidget {
       height: 124,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: color.withOpacity(0.1),
-        border: Border.all(color: color.withOpacity(0.3), width: 1.5),
+        color: color.withValues(alpha:0.1),
+        border: Border.all(color: color.withValues(alpha:0.3), width: 1.5),
         boxShadow: [
-          BoxShadow(color: color.withOpacity(0.2), blurRadius: 40, spreadRadius: 4),
+          BoxShadow(color: color.withValues(alpha:0.2), blurRadius: 40, spreadRadius: 4),
         ],
       ),
       child: Icon(
@@ -509,12 +509,12 @@ class _StatsCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha:0.06),
             blurRadius: 20,
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: Colors.black.withOpacity(0.05)),
+        border: Border.all(color: Colors.black.withValues(alpha:0.05)),
       ),
       child: Column(
         children: [
@@ -610,16 +610,16 @@ class _FaceIdMatchCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.08),
+                color: accent.withValues(alpha:0.08),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: accent.withOpacity(0.25)),
+                border: Border.all(color: accent.withValues(alpha:0.25)),
               ),
               child: Row(
                 children: [
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: accent.withOpacity(0.15),
+                      color: accent.withValues(alpha:0.15),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(icon, color: accent, size: 16),
@@ -641,7 +641,7 @@ class _FaceIdMatchCard extends StatelessWidget {
                         Text(
                           sub,
                           style: TextStyle(
-                            color: accent.withOpacity(0.75),
+                            color: accent.withValues(alpha:0.75),
                             fontSize: 10,
                             height: 1.4,
                           ),
@@ -660,7 +660,7 @@ class _FaceIdMatchCard extends StatelessWidget {
                   width: 30,
                   height: 30,
                   decoration: BoxDecoration(
-                    color: accent.withOpacity(0.1),
+                    color: accent.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(Icons.fingerprint_rounded, color: accent, size: 16),
@@ -675,7 +675,7 @@ class _FaceIdMatchCard extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         faceId,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: _textPrimary,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -686,7 +686,7 @@ class _FaceIdMatchCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(Icons.copy_rounded, color: _textSecondary.withOpacity(0.5), size: 13),
+                Icon(Icons.copy_rounded, color: _textSecondary.withValues(alpha:0.5), size: 13),
               ],
             ),
           ],
@@ -718,7 +718,7 @@ class _StatTile extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.1),
+              color: accent.withValues(alpha:0.1),
               borderRadius: BorderRadius.circular(9),
             ),
             child: Icon(icon, color: accent, size: 17),
@@ -797,15 +797,15 @@ class _ChallengeCardState extends State<_ChallengeCard>
           decoration: BoxDecoration(
             color: _surface,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: widget.accentColor.withOpacity(0.18)),
+            border: Border.all(color: widget.accentColor.withValues(alpha:0.18)),
             boxShadow: [
               BoxShadow(
-                color: widget.accentColor.withOpacity(0.10),
+                color: widget.accentColor.withValues(alpha:0.10),
                 blurRadius: 20,
                 offset: const Offset(0, 6),
               ),
               BoxShadow(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha:0.04),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -817,10 +817,10 @@ class _ChallengeCardState extends State<_ChallengeCard>
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: widget.accentColor.withOpacity(0.1),
+                  color: widget.accentColor.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(13),
                   border: Border.all(
-                      color: widget.accentColor.withOpacity(0.2)),
+                      color: widget.accentColor.withValues(alpha:0.2)),
                 ),
                 child: Icon(widget.icon, color: widget.accentColor, size: 24),
               ),
@@ -842,7 +842,7 @@ class _ChallengeCardState extends State<_ChallengeCard>
                 ),
               ),
               Icon(Icons.arrow_forward_ios_rounded,
-                  color: _textSecondary.withOpacity(0.4), size: 13),
+                  color: _textSecondary.withValues(alpha:0.4), size: 13),
             ],
           ),
         ),
@@ -875,7 +875,7 @@ class _GradientButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: shadowColor.withOpacity(0.3),
+              color: shadowColor.withValues(alpha:0.3),
               blurRadius: 18,
               offset: const Offset(0, 6),
             ),
@@ -923,7 +923,7 @@ class _LightBgPainter extends CustomPainter {
       Offset(size.width / 2, -40),
       size.width * 0.75,
       Paint()
-        ..color = _primary.withOpacity(0.07)
+        ..color = _primary.withValues(alpha:0.07)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 60),
     );
 
@@ -932,12 +932,12 @@ class _LightBgPainter extends CustomPainter {
       Offset(size.width * 0.85, size.height * 0.85),
       size.width * 0.45,
       Paint()
-        ..color = _cyan.withOpacity(0.05)
+        ..color = _cyan.withValues(alpha:0.05)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 50),
     );
 
     // Subtle dot grid
-    final dot = Paint()..color = _primary.withOpacity(0.055);
+    final dot = Paint()..color = _primary.withValues(alpha:0.055);
     for (double x = 0; x < size.width; x += 32) {
       for (double y = 0; y < size.height; y += 32) {
         canvas.drawCircle(Offset(x, y), 1.2, dot);
@@ -981,7 +981,7 @@ class _FaceHeroPainter extends CustomPainter {
       Offset(cx, cy),
       r + 10 + pulse * 10,
       Paint()
-        ..color = _primary.withOpacity(0.1 + pulse * 0.05)
+        ..color = _primary.withValues(alpha:0.1 + pulse * 0.05)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20),
     );
 
@@ -1000,7 +1000,7 @@ class _FaceHeroPainter extends CustomPainter {
       Offset(cx, cy),
       r,
       Paint()
-        ..color = _primary.withOpacity(0.25)
+        ..color = _primary.withValues(alpha:0.25)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5,
     );
@@ -1024,21 +1024,21 @@ class _FaceHeroPainter extends CustomPainter {
       Rect.fromCenter(
           center: Offset(cx, cy - 3), width: r * 0.7, height: r * 0.85),
       Paint()
-        ..color = _primary.withOpacity(0.07)
+        ..color = _primary.withValues(alpha:0.07)
         ..style = PaintingStyle.fill,
     );
     canvas.drawOval(
       Rect.fromCenter(
           center: Offset(cx, cy - 3), width: r * 0.7, height: r * 0.85),
       Paint()
-        ..color = _primary.withOpacity(0.35)
+        ..color = _primary.withValues(alpha:0.35)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5,
     );
 
     // Eyes
     final eyeY = cy - 10.0;
-    final eyePaint = Paint()..color = _primary.withOpacity(0.7);
+    final eyePaint = Paint()..color = _primary.withValues(alpha:0.7);
     canvas.drawCircle(Offset(cx - r * 0.15, eyeY), 4.0, eyePaint);
     canvas.drawCircle(Offset(cx + r * 0.15, eyeY), 4.0, eyePaint);
 
@@ -1054,14 +1054,14 @@ class _FaceHeroPainter extends CustomPainter {
       Offset(cx - r * 0.65, scanY),
       Offset(cx + r * 0.65, scanY),
       Paint()
-        ..color = _primary.withOpacity(0.55)
+        ..color = _primary.withValues(alpha:0.55)
         ..strokeWidth = 1.2,
     );
     canvas.drawRect(
       Rect.fromLTRB(
           cx - r * 0.65, scanY - 10, cx + r * 0.65, scanY + 10),
       Paint()
-        ..color = _primary.withOpacity(0.06)
+        ..color = _primary.withValues(alpha:0.06)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
     );
     canvas.restore();
@@ -1088,10 +1088,10 @@ class _FaceIdHistoryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _success.withOpacity(0.2)),
+        border: Border.all(color: _success.withValues(alpha:0.2)),
         boxShadow: [
           BoxShadow(
-            color: _success.withOpacity(0.06),
+            color: _success.withValues(alpha:0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -1105,7 +1105,7 @@ class _FaceIdHistoryCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: _success.withOpacity(0.1),
+                  color: _success.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(Icons.face_rounded, color: _success, size: 16),
@@ -1125,7 +1125,7 @@ class _FaceIdHistoryCard extends StatelessWidget {
                 child: Text(
                   'Clear all',
                   style: TextStyle(
-                    color: _error.withOpacity(0.7),
+                    color: _error.withValues(alpha:0.7),
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),

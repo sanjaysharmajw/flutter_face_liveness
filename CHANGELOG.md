@@ -1,4 +1,4 @@
-## 2.3.0
+## 2.4.0
 
 ### Improvements
 - Added Swift Package Manager (SPM) support for iOS — `ios/flutter_face_liveness/Package.swift` added with correct `Sources/` structure

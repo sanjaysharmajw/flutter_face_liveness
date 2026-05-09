@@ -18,7 +18,7 @@
 ///   onFailed: (reason) => print('Failed: $reason'),
 /// )
 /// ```
-library flutter_face_liveness;
+
 
 // Widget + controller
 export 'src/flutter_face_liveness_widget.dart';
