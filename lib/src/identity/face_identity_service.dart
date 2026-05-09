@@ -146,7 +146,7 @@ class FaceIdentityService {
     );
     // Re-normalise so cosine similarity stays valid
     double norm = 0.0;
-    for (final v in blended) norm += v * v;
+    for (final v in blended) { norm += v * v; }
     norm = math.sqrt(norm);
     if (norm < 1e-10) return stored;
     return blended.map((v) => v / norm).toList();
