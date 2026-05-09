@@ -59,7 +59,7 @@ class FaceEmbeddingModel {
 
   static List<double> _l2Normalize(List<double> v) {
     double norm = 0.0;
-    for (final x in v) norm += x * x;
+    for (final x in v) { norm += x * x; }
     norm = math.sqrt(norm);
     if (norm < 1e-10) return v;
     return v.map((x) => x / norm).toList();

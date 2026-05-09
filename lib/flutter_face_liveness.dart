@@ -18,6 +18,7 @@
 ///   onFailed: (reason) => print('Failed: $reason'),
 /// )
 /// ```
+library;
 
 
 // Widget + controller

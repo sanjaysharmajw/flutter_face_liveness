@@ -1,3 +1,12 @@
+## 2.5.0
+
+### Bug Fixes
+- Added `library;` declaration to `flutter_face_liveness.dart` — fixes dangling library doc comment lint warning
+- Enclosed `for` loop body in `face_embedding_model.dart` with braces — fixes `curly_braces_in_flow_control_structures` lint warning
+- Wrapped home screen `Column` in `SingleChildScrollView` in example app — fixes `RenderFlex` overflow on small screens; replaced `Spacer()` with `SizedBox(height: 20)` (Spacer is incompatible with scroll views)
+
+---
+
 ## 2.4.0
 
 ### Improvements
