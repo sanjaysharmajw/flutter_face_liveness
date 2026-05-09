@@ -1,3 +1,14 @@
+## 2.3.0
+
+### Improvements
+- Added Swift Package Manager (SPM) support for iOS — `ios/flutter_face_liveness/Package.swift` added with correct `Sources/` structure
+
+### Bug Fixes
+- Removed unnecessary `as List<double>` cast in `TFLiteService._runInference()` (line 88) — type was already inferred correctly from `List.filled`
+- Removed unused `_Float32Reshape` extension on `Float32List` — `reshape()` call it depended on was already commented out
+
+---
+
 ## 2.2.0
 
 ### Improvements

@@ -105,7 +105,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         children: [
           const _LightBackground(),
           SafeArea(
-            child: Column(
+            child: SingleChildScrollView(
+              child: Column(
               children: [
                 const SizedBox(height: 48),
                 AnimatedBuilder(
@@ -209,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 ],
-                const Spacer(),
+                const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -226,6 +227,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ],
             ),
           ),
+        ),
         ],
       ),
     );
