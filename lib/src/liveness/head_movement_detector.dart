@@ -3,9 +3,10 @@ import '../models/liveness_action.dart';
 
 /// Detects directional head movements using Euler angle thresholds.
 ///
-/// Direction convention for FRONT camera (raw image is mirrored):
-///   headEulerAngleY > 0  → user turned their head LEFT
-///   headEulerAngleY < 0  → user turned their head RIGHT
+/// Expects [FaceData.headEulerAngleY] already iOS-corrected (see FaceData.fromFace).
+/// Unified convention on both platforms (front camera):
+///   headEulerAngleY > 0  → user turned LEFT
+///   headEulerAngleY < 0  → user turned RIGHT
 ///   headEulerAngleX > 0  → user looked UP
 ///   headEulerAngleX < 0  → user looked DOWN
 ///

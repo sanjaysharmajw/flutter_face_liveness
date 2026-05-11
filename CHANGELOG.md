@@ -1,3 +1,10 @@
+## 2.7.0
+
+### Bug Fixes
+- **iOS headLeft / headRight detection inverted** — iOS front-camera delivers horizontally-mirrored BGRA8888 frames; `_buildInputImage()` passes them to ML Kit with `rotation0deg` and no mirror correction. This caused ML Kit to report a flipped `headEulerAngleY` sign: physical right turn produced positive yaw (mapped to `turnLeft`), physical left turn produced negative yaw (mapped to `turnRight`). Fixed in `FaceData.fromFace()` by negating `headEulerAngleY` on `Platform.isIOS`, aligning both platforms to the same convention (positive yaw = user physically turned left). Android is unaffected — ML Kit's sensor-rotation correction already provides the correct sign there.
+
+---
+
 ## 2.5.0
 
 ### Bug Fixes

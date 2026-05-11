@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:ui' show Rect, Size;
 
 import 'package:flutter/foundation.dart';
@@ -19,10 +20,19 @@ class FaceData {
   });
 
   factory FaceData.fromFace(Face face, Size imageSize) {
+    // iOS front-camera delivers horizontally-mirrored BGRA8888 frames and we
+    // pass them to ML Kit with rotation0deg (no correction). The mirroring
+    // flips the sign of headEulerAngleY: physical RIGHT gives positive yaw,
+    // physical LEFT gives negative — opposite of Android. Negate on iOS so
+    // both platforms share the same convention:
+    //   positive yaw = user physically turned LEFT (front-camera convention).
+    final rawYaw = face.headEulerAngleY ?? 0.0;
+    final correctedYaw = Platform.isIOS ? -rawYaw : rawYaw;
+
     return FaceData(
       boundingBox: face.boundingBox,
       headEulerAngleX: face.headEulerAngleX ?? 0.0,
-      headEulerAngleY: face.headEulerAngleY ?? 0.0,
+      headEulerAngleY: correctedYaw,
       headEulerAngleZ: face.headEulerAngleZ ?? 0.0,
       leftEyeOpenProbability: face.leftEyeOpenProbability ?? 1.0,
       rightEyeOpenProbability: face.rightEyeOpenProbability ?? 1.0,
@@ -37,7 +47,8 @@ class FaceData {
   /// Pitch: positive = looking up, negative = looking down
   final double headEulerAngleX;
 
-  /// Yaw: positive = looking right (from viewer's perspective left), negative = looking left
+  /// Yaw (iOS-corrected): positive = user turned LEFT, negative = user turned RIGHT.
+  /// Convention is consistent across Android and iOS after the iOS negation in fromFace().
   final double headEulerAngleY;
 
   /// Roll: head tilt
