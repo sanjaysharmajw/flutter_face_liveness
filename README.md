@@ -727,24 +727,6 @@ flutter run
 
 ---
 
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for the full version history.
-
-**Latest — v2.0.0:**
-- Persistent Face ID with `isFaceIdNew` flag (new / returning face detection)
-- FaceNet TFLite auto-download with progress UI
-- Isolate-based ML preprocessing (YUV, brightness, embedding)
-- 7-signal anti-spoof engine
-- Platform-correct BT.601 brightness (fixes iOS false "too dark")
-- 6-frame brightness debounce (eliminates startup flicker)
-- `Random.secure()` session IDs
-- `openMouth` liveness action
-- Dark / light / system theming
-- Android minSdk raised to 26
-
----
-
 ## License
 
 MIT — see [LICENSE](LICENSE)
