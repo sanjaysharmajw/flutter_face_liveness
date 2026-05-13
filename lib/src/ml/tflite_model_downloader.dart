@@ -15,6 +15,14 @@ class TFLiteModelDownloader {
   /// Minimum valid file size — guards against incomplete downloads.
   static const int _minValidBytes = 512 * 1024; // 512 KB
 
+  /// Default bundled anti-spoof model — used automatically when
+  /// [LivenessConfig.enableTFLite] is true and no custom URL/path is set.
+  static const String bundledModelUrl =
+      'https://github.com/sanjaysharmajw/flutter_face_liveness/releases/download/v2.0.0-models/FaceAntiSpoofing.tflite';
+
+  /// Input size required by the bundled model.
+  static const int bundledInputSize = 256;
+
   /// Remote URL to download the model from.
   final String modelUrl;
 

@@ -95,10 +95,13 @@ class LivenessController extends ChangeNotifier {
         try {
           String? modelPath = _config.tfliteModelPath;
 
-          // Auto-download when a URL is provided and no local path is set
-          if (modelPath == null && _config.tfliteModelUrl != null) {
+          // Resolve download URL: prefer user-supplied, fall back to bundled default
+          final downloadUrl = _config.tfliteModelUrl ?? TFLiteModelDownloader.bundledModelUrl;
+
+          // Auto-download when no local path is set
+          if (modelPath == null) {
             final downloader = TFLiteModelDownloader(
-              modelUrl: _config.tfliteModelUrl!,
+              modelUrl: downloadUrl,
               onProgress: (p) {
                 _tfliteModelDownloadProgress = p;
                 notifyListeners();
@@ -109,21 +112,22 @@ class LivenessController extends ChangeNotifier {
             notifyListeners();
           }
 
-          if (modelPath != null) {
-            _tflite = TFLiteService(
-              modelPath: modelPath,
-              inputSize: _config.tfliteInputSize,
-            );
-            final loaded = await _tflite!.load();
-            if (!loaded) {
-              // Corrupted or wrong model — wipe the cache so next launch re-downloads
-              if (_config.tfliteModelUrl != null && !modelPath.startsWith('assets/')) {
-                await TFLiteModelDownloader.clearCache();
-                debugPrint('[LivenessController] Corrupted TFLite cache cleared — will re-download next launch');
-              }
-              _tfliteWarning = 'TFLite model failed to load (cache cleared — restart to re-download)';
-              _tflite = null;
+          // Resolve input size: prefer user-supplied, otherwise use bundled model's size
+          final inputSize = _config.tfliteInputSize ??
+              (_config.tfliteModelPath == null && _config.tfliteModelUrl == null
+                  ? TFLiteModelDownloader.bundledInputSize
+                  : 128);
+
+          _tflite = TFLiteService(modelPath: modelPath, inputSize: inputSize);
+          final loaded = await _tflite!.load();
+          if (!loaded) {
+            // Corrupted or wrong model — wipe the cache so next launch re-downloads
+            if (!modelPath.startsWith('assets/')) {
+              await TFLiteModelDownloader.clearCache();
+              debugPrint('[LivenessController] Corrupted TFLite cache cleared — will re-download next launch');
             }
+            _tfliteWarning = 'TFLite model failed to load (cache cleared — restart to re-download)';
+            _tflite = null;
           }
         } catch (e) {
           debugPrint('[LivenessController] TFLite unavailable this session: $e');

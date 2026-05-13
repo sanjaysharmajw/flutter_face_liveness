@@ -30,7 +30,7 @@ class LivenessConfig {
     this.enableTFLite = false,
     this.tfliteModelPath,
     this.tfliteModelUrl,
-    this.tfliteInputSize = 128,
+    this.tfliteInputSize,
 
     // ── Face geometry ────────────────────────────────────────────────────
     this.faceTooFarRatio = 0.015,
@@ -95,18 +95,18 @@ class LivenessConfig {
 
   /// HTTPS URL to auto-download the TFLite model from on first use.
   ///
+  /// When null the package automatically uses its bundled anti-spoof model URL —
+  /// simply set [enableTFLite] to true and the model is downloaded and cached
+  /// with no extra configuration. Set this only when using a custom model.
+  ///
   /// Ignored when [tfliteModelPath] is already set. The downloaded file is
   /// cached permanently in the app documents directory; subsequent sessions
   /// load from cache instantly with no network activity.
-  ///
-  /// Example — upload your .tflite file to GitHub Releases and set:
-  /// ```dart
-  /// tfliteModelUrl: 'https://github.com/you/repo/releases/download/v1/model.tflite'
-  /// ```
   final String? tfliteModelUrl;
 
   /// Input image size expected by the TFLite model (square).
-  final int tfliteInputSize;
+  /// When null the package uses the bundled model's required size (256).
+  final int? tfliteInputSize;
 
   // ── Face geometry ─────────────────────────────────────────────────────────
   final double faceTooFarRatio;

@@ -368,10 +368,6 @@ class LivenessScreen extends StatelessWidget {
         enableBlurDetection: true,
         enableFaceId: enableFaceId,
         enableTFLite: enableTFLite,
-        tfliteModelUrl: enableTFLite
-            ? 'https://github.com/sanjaysharmajw/flutter_face_liveness/releases/download/v2.0.0-models/FaceAntiSpoofing.tflite'
-            : null,
-        tfliteInputSize: enableTFLite ? 256 : 128,
         showDebugOverlay: false,
       ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
