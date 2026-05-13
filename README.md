@@ -43,7 +43,7 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 | **Session Security** | Cryptographically unique session IDs via `Random.secure()` |
 | **Action Randomisation** | Fisher-Yates shuffle prevents predictable replay attacks |
 | **Isolate ML** | YUV→NV21 conversion, quality analysis, and face embedding — all in background isolates |
-| **TFLite Plug-in** | Drop in your own deepfake-detection model without changing package APIs |
+| **TFLite Anti-Spoof** | Bundled `FaceAntiSpoofing` model — `enableTFLite: true` auto-downloads & runs in a background isolate. Custom model supported via `tfliteModelPath` / `tfliteModelUrl` |
 | **Theming** | Dark / light / system mode via `LivenessConfig.themeMode` |
 | **Debug Overlay** | Real-time Euler angles, eye/smile probabilities, brightness, blur on screen |
 
@@ -169,7 +169,7 @@ onSuccess: (result) {
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^2.8.0
+  flutter_face_liveness: ^2.9.0
 ```
 
 ### 2. Platform permissions
@@ -389,10 +389,11 @@ LivenessConfig({
   bool   enableFaceId                = false,
   double faceIdSimilarityThreshold   = 0.65,
 
-  // TFLite (optional custom model)
+  // TFLite anti-spoof (bundled model — zero config)
   bool    enableTFLite    = false,
-  String? tfliteModelPath = null,
-  int     tfliteInputSize = 128,
+  String? tfliteModelPath = null,   // override: asset key or absolute path
+  String? tfliteModelUrl  = null,   // override: custom download URL
+  int?    tfliteInputSize = null,   // override: null = auto (256 for bundled model)
 
   // UI
   ThemeMode themeMode       = ThemeMode.dark,
@@ -421,9 +422,10 @@ LivenessConfig({
 | `faceTooCloseRatio` | `double` | `0.70` | Face bounding-box area ratio above which = "too close" |
 | `enableFaceId` | `bool` | `false` | Persistent face identity. FaceNet model auto-downloaded on first run |
 | `faceIdSimilarityThreshold` | `double` | `0.65` | Cosine similarity cutoff. Same face across lighting/angle typically scores 0.65–0.85 |
-| `enableTFLite` | `bool` | `false` | Custom TFLite deepfake / PAD model |
-| `tfliteModelPath` | `String?` | `null` | Flutter asset path to `.tflite` model |
-| `tfliteInputSize` | `int` | `128` | Model input size (square, px) |
+| `enableTFLite` | `bool` | `false` | Enable TFLite anti-spoof. Bundled model auto-downloaded on first use — no extra config needed |
+| `tfliteModelPath` | `String?` | `null` | Override: Flutter asset key or absolute path to a custom `.tflite` model |
+| `tfliteModelUrl` | `String?` | `null` | Override: HTTPS URL for a custom model download. When null the bundled model URL is used |
+| `tfliteInputSize` | `int?` | `null` | Override: model input size (square, px). When null auto-resolved to `256` for the bundled model |
 | `themeMode` | `ThemeMode` | `dark` | `ThemeMode.system` follows device theme |
 | `showDebugOverlay` | `bool` | `false` | Euler angles, eye/smile probabilities, brightness, blur |
 
@@ -433,7 +435,7 @@ LivenessConfig({
 
 | Action | Enum | How it triggers |
 |--------|------|----------------|
-| Blink | `LivenessAction.blink` | Both eye open-probability drops below 0.40, then returns above 0.75 |
+| Blink | `LivenessAction.blink` | Both eye open-probability drops below **0.50** — fires instantly on close, no wait for re-open |
 | Turn Left | `LivenessAction.turnLeft` | Yaw angle > +15° held for ≥ 80 ms |
 | Turn Right | `LivenessAction.turnRight` | Yaw angle < −15° held for ≥ 80 ms |
 | Look Up | `LivenessAction.lookUp` | Pitch angle > +15° held for ≥ 80 ms |
@@ -591,9 +593,38 @@ await controller.dispose();              // release all resources
 
 ## TFLite Integration (Optional)
 
-The package includes a plug-in interface for a custom deepfake / presentation-attack-detection model. Use this to layer additional ML-based anti-spoof on top of the built-in heuristics.
+The package ships with a bundled `FaceAntiSpoofing.tflite` model (3.9 MB). Enable it with a single flag — the model downloads automatically on first launch and is cached permanently. All inference runs in a **background isolate** so the camera preview and blink/head-movement detection are never blocked.
 
-Inference runs automatically on every frame where a face is detected. The most recent score is attached to `LivenessResult.tfliteScore` at session end.
+### Zero-config (bundled model)
+
+```dart
+config: LivenessConfig(
+  enableTFLite: true,   // that's it — model downloads & runs automatically
+),
+```
+
+The result is available immediately after the session:
+
+```dart
+onSuccess: (result) {
+  print('TFLite score : ${result.tfliteScore}');   // 0.0–1.0  real-face probability
+  print('Deepfake     : ${result.deepfakeDetected}');
+},
+```
+
+### Custom model
+
+Bring your own deepfake / PAD model if you need a different architecture:
+
+```dart
+config: LivenessConfig(
+  enableTFLite: true,
+  tfliteModelUrl:  'https://your-cdn.com/custom_model.tflite',  // auto-download
+  // OR
+  tfliteModelPath: 'assets/custom_model.tflite',                // bundled asset
+  tfliteInputSize: 128,  // must match your model's input size
+),
+```
 
 ### Expected model contract
 
@@ -601,42 +632,19 @@ Inference runs automatically on every frame where a face is detected. The most r
 |----------|------------|
 | Input shape | `[1, H, W, 3]` float32 |
 | Input range | `0.0–1.0` (RGB, normalised) |
-| Output shape | `[1, 2]` |
-| Output meaning | `[real_probability, spoof_probability]` |
+| Output (standard) | `[1, 2]` → `[real_probability, spoof_probability]` |
+| Output (dual-tensor) | `clss_pred [1, N]` + `leaf_node_mask [1, N]` — FaceAntiSpoofing style automatically detected |
 
-### Setup
+### Internet permission (first launch only)
 
-1. Place your `.tflite` model in `assets/`:
-   ```
-   assets/
-   └── anti_spoof.tflite
-   ```
+The bundled model (~3.9 MB) is downloaded once and cached permanently. Add the internet permission the same way as Face ID:
 
-2. Register in `pubspec.yaml`:
-   ```yaml
-   flutter:
-     assets:
-       - assets/anti_spoof.tflite
-   ```
+```xml
+<!-- AndroidManifest.xml -->
+<uses-permission android:name="android.permission.INTERNET" />
+```
 
-3. Pass the asset key via config:
-   ```dart
-   config: LivenessConfig(
-     enableTFLite: true,
-     tfliteModelPath: 'assets/anti_spoof.tflite',  // asset key or absolute path
-     tfliteInputSize: 128,  // match your model's expected input size
-   ),
-   ```
-
-4. Read the result:
-   ```dart
-   onSuccess: (result) {
-     print('TFLite score : ${result.tfliteScore}');   // 0.0–1.0 real-face probability
-     print('Deepfake     : ${result.deepfakeDetected}');
-   },
-   ```
-
-> **Note:** `tfliteModelPath` accepts either a Flutter asset key (e.g. `'assets/anti_spoof.tflite'`) or an absolute filesystem path obtained via `path_provider`.
+> iOS does not require an extra permission for network access.
 
 ## Performance
 
@@ -659,6 +667,7 @@ Inference runs automatically on every frame where a face is detected. The most r
 | YUV → NV21 + brightness/blur/hash | Background isolate (`compute()`) |
 | Face crop + resize + normalise | Background isolate (`compute()`) |
 | FaceNet embedding inference | Background isolate (`compute()`) |
+| **TFLite preprocessing + `invoke()`** | **Persistent background isolate (never blocks camera)** |
 | UI rendering | Main thread — never blocked |
 
 **Tuning tips:**

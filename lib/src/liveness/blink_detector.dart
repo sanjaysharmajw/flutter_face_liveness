@@ -1,74 +1,64 @@
 import '../models/face_data.dart';
 
-/// Detects genuine eye blinks using a finite state machine.
+/// Detects genuine eye blinks — fires as soon as both eyes close (not on re-open).
 ///
-/// A blink requires both eyes to close and then re-open within [_maxBlinkDurationMs].
-/// Left and right eyes are allowed up to [_eyeSyncWindowMs] apart (ML Kit at fast
-/// mode can report them 1–2 frames out of sync at 20 fps).
+/// Firing on close instead of on re-open eliminates the 150–300 ms wait for the
+/// full close→open cycle, making detection feel instant.
+///
+/// A "was recently open" guard prevents false positives from people with
+/// naturally droopy eyelids: both eyes must have been seen clearly open
+/// (probability > [_openThreshold]) within the last [_wasOpenWindowMs] before
+/// a close event is accepted as a blink.
 class BlinkDetector {
-  // Raised from 0.25 → catches lighter/quicker blinks that don't fully close
-  static const double _closedThreshold  = 0.35;
-  // Lowered from 0.75 → re-open is confirmed sooner
-  static const double _openThreshold    = 0.65;
-  static const int    _maxBlinkDurationMs = 600;
-  // Lowered from 800 → user can retry quickly if the first blink wasn't caught
-  static const int    _debounceMs       = 400;
-  // Grace window: left & right eye close events within 120 ms count as simultaneous
-  static const int    _eyeSyncWindowMs  = 120;
+  // 0.50 — catches fast blinks where ML Kit only dips to 0.45–0.55 at peak
+  static const double _closedThreshold = 0.50;
+  // Eyes must have been above this recently to confirm a genuine blink
+  static const double _openThreshold   = 0.65;
+  // How recently eyes must have been "open" (ms) — blocks droopy-eye false positives
+  static const int    _wasOpenWindowMs = 1500;
+  // Minimum gap between two accepted blinks — prevents double-fire on same blink
+  static const int    _debounceMs      = 400;
+  // L/R close events within this window count as simultaneous (4 frames at 20 fps)
+  static const int    _eyeSyncWindowMs = 200;
 
-  _BlinkState _state             = _BlinkState.open;
-  int         _eyesClosedAtMs    = 0;
-  int         _lastBlinkMs       = 0;
-  int         _leftClosedAtMs    = 0;
-  int         _rightClosedAtMs   = 0;
+  int _leftClosedAtMs  = 0;
+  int _rightClosedAtMs = 0;
+  int _leftOpenAtMs    = 0;
+  int _rightOpenAtMs   = 0;
+  int _lastBlinkMs     = 0;
 
   /// Call on every frame. Returns true exactly once per detected blink.
   bool process(FaceData face) {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
 
-    // Track the last time each eye was seen as closed (independent timestamps)
+    // Track independent timestamps for each eye
     if (face.leftEyeOpenProbability  < _closedThreshold) _leftClosedAtMs  = nowMs;
     if (face.rightEyeOpenProbability < _closedThreshold) _rightClosedAtMs = nowMs;
+    if (face.leftEyeOpenProbability  > _openThreshold)   _leftOpenAtMs    = nowMs;
+    if (face.rightEyeOpenProbability > _openThreshold)   _rightOpenAtMs   = nowMs;
 
-    // Both eyes count as "closed" if each was detected closed within the sync window
+    // Both eyes closed within the sync window (handles 1–2 frame L/R offset)
     final bothClosed = (nowMs - _leftClosedAtMs  < _eyeSyncWindowMs) &&
                        (nowMs - _rightClosedAtMs < _eyeSyncWindowMs);
-    final bothOpen   = face.leftEyeOpenProbability  > _openThreshold &&
-                       face.rightEyeOpenProbability > _openThreshold;
 
-    switch (_state) {
-      case _BlinkState.open:
-        if (bothClosed) {
-          _state          = _BlinkState.closed;
-          _eyesClosedAtMs = nowMs;
-        }
-        break;
+    // Both eyes were clearly open recently (guards against droopy eyelids)
+    final wasOpen = (nowMs - _leftOpenAtMs  < _wasOpenWindowMs) &&
+                    (nowMs - _rightOpenAtMs < _wasOpenWindowMs);
 
-      case _BlinkState.closed:
-        final closedDuration = nowMs - _eyesClosedAtMs;
-        if (closedDuration > _maxBlinkDurationMs) {
-          // Held too long → looking away or photo, not a genuine blink
-          _state = _BlinkState.open;
-        } else if (bothOpen) {
-          _state = _BlinkState.open;
-          if (nowMs - _lastBlinkMs > _debounceMs) {
-            _lastBlinkMs = nowMs;
-            return true;
-          }
-        }
-        break;
+    // Fire immediately on close — no waiting for re-open
+    if (bothClosed && wasOpen && nowMs - _lastBlinkMs > _debounceMs) {
+      _lastBlinkMs = nowMs;
+      return true;
     }
 
     return false;
   }
 
   void reset() {
-    _state           = _BlinkState.open;
-    _eyesClosedAtMs  = 0;
-    _lastBlinkMs     = 0;
     _leftClosedAtMs  = 0;
     _rightClosedAtMs = 0;
+    _leftOpenAtMs    = 0;
+    _rightOpenAtMs   = 0;
+    _lastBlinkMs     = 0;
   }
 }
-
-enum _BlinkState { open, closed }

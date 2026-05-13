@@ -1,3 +1,38 @@
+## 2.9.0
+
+### New Features
+
+- **Bundled anti-spoof model — zero-config TFLite** — `enableTFLite: true` is now all you need. The package automatically downloads `FaceAntiSpoofing.tflite` (3.9 MB) on first launch and caches it permanently. No `tfliteModelUrl`, no `tfliteInputSize`, no model file to bundle. Custom models are still fully supported via `tfliteModelPath` / `tfliteModelUrl`.
+  - `TFLiteModelDownloader.bundledModelUrl` — package-internal constant; not exposed in the public API.
+  - `TFLiteModelDownloader.bundledInputSize` — `256` (required by the bundled FaceAntiSpoofing model).
+  - `LivenessConfig.tfliteInputSize` changed from `int` (default `128`) to `int?` (default `null` → resolves to `256` for the bundled model automatically).
+  - `LivenessConfig.tfliteModelUrl` — still accepted for custom models; when omitted, the bundled URL is used.
+
+### Improvements
+
+- **TFLite inference moved to a persistent background isolate** — `TFLiteService` now spawns a long-lived `Isolate` that owns the `Interpreter`. All frame preprocessing (pixel iteration, YUV→RGB, bbox crop/resize) and `invoke()` run entirely off the main thread. The camera preview and face-detection pipeline are never blocked, fixing the lag introduced when TFLite was enabled in v2.8.0.
+  - `Interpreter.fromBuffer()` is used in the worker isolate so no Flutter asset bundle is required there.
+  - `TransferableTypedData` is used for per-frame image bytes — zero-copy transfer to the worker isolate.
+  - Main thread only sends a message and awaits a `Completer`; it yields the event loop while waiting.
+
+- **`_tfliteWarning` banner auto-clears** — The red warning banner now disappears automatically once a successful TFLite inference result is received, rather than persisting for the whole session.
+
+- **Race condition fix — `tfliteScore` always non-null on success** — `LivenessController._onEngineComplete()` now tracks `_tfliteFuture` and `await`s it before reading `_lastTfliteScore`. Previously, if the session completed on the same frame that fired the last `unawaited` inference, the score was always `null`.
+
+### Bug Fixes
+
+- **Camera lag and eye-blink detection broken when TFLite enabled** — Root cause: `allocateTensors()` was being called on every camera frame (an expensive synchronous native call). Fixed by calling `resizeInputTensor()` + `allocateTensors()` once at model-load time in `load()` and removing them from `run()`. Combined with the isolate move above, the main thread is now completely free of TFLite work.
+
+- **Blink detection: instant fire on close** — `BlinkDetector` previously required the full close → re-open cycle before confirming a blink, adding 150–300 ms of latency. Now fires immediately when both eyes drop below the closed threshold. A `_wasOpenWindowMs = 1500 ms` guard (both eyes must have been clearly open within the last 1.5 s) prevents false positives from naturally droopy eyelids.
+
+- **Blink detection: raised closed threshold to `0.50`** — Fast blinks at 20 fps often only drop ML Kit's eye-open probability to `0.45–0.55`. The previous threshold of `0.25` (and even `0.40`) silently missed these. `0.50` catches them reliably.
+
+- **Blink detection: L/R eye sync window widened to 200 ms** — ML Kit at `FaceDetectorMode.fast` often reports left and right eye close events 1–3 frames apart. The previous implementation required both eyes in the exact same frame. The new `_eyeSyncWindowMs = 200 ms` window (≈ 4 frames at 20 fps) counts them as simultaneous.
+
+- **Blink debounce lowered to 400 ms** — Was 800 ms; user can retry a missed blink in under half a second.
+
+---
+
 ## 2.8.0
 
 ### Bug Fixes
