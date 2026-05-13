@@ -125,9 +125,11 @@ void _tfliteWorker(_InitMsg init) {
       interp.invoke();
 
       final out0 = interp.getOutputTensor(0).data.buffer.asFloat32List();
+      debugPrint('[TFLite] outCount=$outCount  out0=${out0.take(4).toList()}');
       _ResultMsg result;
       if (outCount >= 2) {
         final out1 = interp.getOutputTensor(1).data.buffer.asFloat32List();
+        debugPrint('[TFLite] out1=${out1.take(4).toList()}');
         result = _dualScore(msg.id, out0, out1);
       } else {
         result = _singleScore(msg.id, out0);
@@ -159,9 +161,9 @@ Float32List _bgraFloat32(
       final sx = (x0 + dx * cw ~/ sz).clamp(0, w - 1);
       final sy = (y0 + dy * ch ~/ sz).clamp(0, h - 1);
       final p = (sy * w + sx) * 4;
-      out[i++] = bytes[p + 2] / 255.0; // R (BGRA→RGB)
-      out[i++] = bytes[p + 1] / 255.0; // G
-      out[i++] = bytes[p    ] / 255.0; // B
+      out[i++] = bytes[p + 2] / 127.5 - 1.0; // R (BGRA→RGB), normalised to [-1, 1]
+      out[i++] = bytes[p + 1] / 127.5 - 1.0; // G
+      out[i++] = bytes[p    ] / 127.5 - 1.0; // B
     }
   }
   return out;
@@ -204,9 +206,9 @@ Float32List _nv21Float32(
       final r = (yVal + 1.402   * (vVal - 128)).round().clamp(0, 255);
       final g = (yVal - 0.34414 * (uVal - 128) - 0.71414 * (vVal - 128)).round().clamp(0, 255);
       final b = (yVal + 1.772   * (uVal - 128)).round().clamp(0, 255);
-      out[i++] = r / 255.0;
-      out[i++] = g / 255.0;
-      out[i++] = b / 255.0;
+      out[i++] = r / 127.5 - 1.0; // normalised to [-1, 1]
+      out[i++] = g / 127.5 - 1.0;
+      out[i++] = b / 127.5 - 1.0;
     }
   }
   return out;
@@ -214,6 +216,7 @@ Float32List _nv21Float32(
 
 _ResultMsg _singleScore(int id, Float32List out) {
   if (out.length >= 2) {
+    // FaceAntiSpoofing model: index 0 = real, index 1 = spoof
     final r = out[0].clamp(0.0, 1.0);
     final s = out[1].clamp(0.0, 1.0);
     return _ResultMsg(id, realScore: r, spoofScore: s);
@@ -225,12 +228,15 @@ _ResultMsg _dualScore(int id, Float32List clss, Float32List leaf) {
   final maxV = clss.reduce(math.max);
   final expV = clss.map((v) => math.exp(v - maxV)).toList();
   final sumE = expV.reduce((a, b) => a + b);
-  double score = 0.0;
+  double spoofFraction = 0.0;
   for (int i = 0; i < clss.length; i++) {
-    score += (expV[i] / sumE) * leaf[i];
+    spoofFraction += (expV[i] / sumE) * leaf[i];
   }
-  score = score.clamp(0.0, 1.0);
-  return _ResultMsg(id, realScore: score, spoofScore: 1.0 - score);
+  spoofFraction = spoofFraction.clamp(0.0, 1.0);
+  // leaf[i]=1 means spoof vote, so spoofFraction = spoof score
+  final realScore = 1.0 - spoofFraction;
+  debugPrint('[TFLite] spoofFraction=$spoofFraction  realScore=$realScore');
+  return _ResultMsg(id, realScore: realScore, spoofScore: spoofFraction);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
