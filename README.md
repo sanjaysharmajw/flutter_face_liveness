@@ -1,6 +1,6 @@
 # flutter_face_liveness
 
-[![pub version](https://img.shields.io/pub/v/flutter_face_liveness.svg)](https://pub.dev/packages/flutter_face_liveness)
+[![pub version](https://img.shields.io/badge/pub-3.0.0-blue)](https://pub.dev/packages/flutter_face_liveness)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 
@@ -37,7 +37,8 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 | **Liveness** | 7 challenge actions — blink, turn left/right, look up/down, smile, open mouth |
 | **Face ID** | **Same face → always same ID**, across sessions, restarts, and days. Powered by FaceNet TFLite (auto-downloaded, one-time ~23 MB) |
 | **New/Returning** | `isFaceIdNew` flag tells you instantly if it's a first-time or returning face |
-| **Anti-Spoof** | 7-signal composite engine — eye variance, geometry, pose, micro-motion, quality, tracking |
+| **Anti-Spoof** | 9-signal composite engine — eye variance, geometry, pose, micro-motion, quality, tracking, brightness variance, motion jitter |
+| **Video Replay Detection** | MiniFASNet-V2 TFLite model detects pre-recorded video replay attacks — `enableVideoReplayDetection: true` auto-downloads model |
 | **Frame Quality** | BT.601 platform-correct brightness (Android NV21 + iOS BGRA8888), blur, overexposure — with 6-frame debounce |
 | **Replay Guard** | FNV-1a frame hashing detects looped / static-image attacks |
 | **Session Security** | Cryptographically unique session IDs via `Random.secure()` |
@@ -169,7 +170,7 @@ onSuccess: (result) {
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^2.9.0
+  flutter_face_liveness: ^3.0.0
 ```
 
 ### 2. Platform permissions
@@ -390,10 +391,18 @@ LivenessConfig({
   double faceIdSimilarityThreshold   = 0.65,
 
   // TFLite anti-spoof (bundled model — zero config)
-  bool    enableTFLite    = false,
-  String? tfliteModelPath = null,   // override: asset key or absolute path
-  String? tfliteModelUrl  = null,   // override: custom download URL
-  int?    tfliteInputSize = null,   // override: null = auto (256 for bundled model)
+  bool    enableTFLite           = false,
+  String? tfliteModelPath        = null,   // override: asset key or absolute path
+  String? tfliteModelUrl         = null,   // override: custom download URL
+  int?    tfliteInputSize        = null,   // override: null = auto (256 for bundled model)
+  double  tfliteDeepfakeThreshold = 0.40, // score below this → deepfakeDetected: true
+
+  // Video replay detection (MiniFASNet-V2 — zero config)
+  bool    enableVideoReplayDetection = false,
+  String? videoReplayModelPath       = null,
+  String? videoReplayModelUrl        = null,
+  int?    videoReplayInputSize       = null,
+  double  videoReplayThreshold       = 0.50,  // score below this → videoReplayDetected: true
 
   // UI
   ThemeMode themeMode       = ThemeMode.dark,
@@ -426,6 +435,12 @@ LivenessConfig({
 | `tfliteModelPath` | `String?` | `null` | Override: Flutter asset key or absolute path to a custom `.tflite` model |
 | `tfliteModelUrl` | `String?` | `null` | Override: HTTPS URL for a custom model download. When null the bundled model URL is used |
 | `tfliteInputSize` | `int?` | `null` | Override: model input size (square, px). When null auto-resolved to `256` for the bundled model |
+| `tfliteDeepfakeThreshold` | `double` | `0.40` | TFLite real-score below this sets `deepfakeDetected: true` |
+| `enableVideoReplayDetection` | `bool` | `false` | Enable MiniFASNet-V2 video-replay model. Auto-downloads on first use |
+| `videoReplayModelPath` | `String?` | `null` | Override: local path for video-replay model |
+| `videoReplayModelUrl` | `String?` | `null` | Override: download URL for video-replay model |
+| `videoReplayInputSize` | `int?` | `null` | Override: input size for video-replay model (default 80) |
+| `videoReplayThreshold` | `double` | `0.50` | Real-score below this sets `videoReplayDetected: true` |
 | `themeMode` | `ThemeMode` | `dark` | `ThemeMode.system` follows device theme |
 | `showDebugOverlay` | `bool` | `false` | Euler angles, eye/smile probabilities, brightness, blur |
 
@@ -472,9 +487,11 @@ class LivenessResult {
   final double confidenceScore;   // 0.0–1.0 composite anti-spoof score
   final bool   isRealHuman;       // true when anti-spoof passes
   final bool   spoofDetected;     // true if heuristic signals triggered
-  final bool   deepfakeDetected;  // true if TFLite model triggered (when enabled)
-  final double? tfliteScore;      // raw TFLite model output (when enabled)
-  final String? failureReason;    // human-readable reason on failure
+  final bool   deepfakeDetected;      // true if TFLite score < tfliteDeepfakeThreshold
+  final double? tfliteScore;          // raw TFLite real-face probability (when enabled)
+  final double? videoReplayScore;     // raw MiniFASNet real-face probability (when enabled)
+  final bool   videoReplayDetected;   // true if video replay attack flagged
+  final String? failureReason;        // human-readable reason on failure
   final int?   sessionDurationMs; // total session time in ms
 
   // Session ID format: "LV-{12-char-timestamp-hex}-{8-char-secure-random-hex}"
@@ -593,22 +610,39 @@ await controller.dispose();              // release all resources
 
 ## TFLite Integration (Optional)
 
-The package ships with a bundled `FaceAntiSpoofing.tflite` model (3.9 MB). Enable it with a single flag — the model downloads automatically on first launch and is cached permanently. All inference runs in a **background isolate** so the camera preview and blink/head-movement detection are never blocked.
+Two TFLite models are available, both auto-downloaded on first use and cached permanently. All inference runs in a **background isolate** — the camera and blink detection are never blocked.
 
-### Zero-config (bundled model)
+### Anti-Spoof (FaceAntiSpoofing, 3.9 MB)
 
 ```dart
 config: LivenessConfig(
-  enableTFLite: true,   // that's it — model downloads & runs automatically
+  enableTFLite: true,              // auto-downloads on first launch
+  tfliteDeepfakeThreshold: 0.40,  // score below this → deepfakeDetected: true
 ),
 ```
 
-The result is available immediately after the session:
+```dart
+onSuccess: (result) {
+  print('TFLite score : ${result.tfliteScore}');      // 0.0–1.0 real-face probability
+  print('Deepfake     : ${result.deepfakeDetected}'); // true when score < 0.40
+},
+```
+
+### Video Replay Detection (MiniFASNet-V2, 1.7 MB)
+
+Detects pre-recorded video replay attacks — someone pointing a phone showing a video of a real person.
+
+```dart
+config: LivenessConfig(
+  enableVideoReplayDetection: true,  // auto-downloads MiniFASNet-V2 on first launch
+  videoReplayThreshold: 0.50,        // score below this → videoReplayDetected: true
+),
+```
 
 ```dart
 onSuccess: (result) {
-  print('TFLite score : ${result.tfliteScore}');   // 0.0–1.0  real-face probability
-  print('Deepfake     : ${result.deepfakeDetected}');
+  print('Replay score   : ${result.videoReplayScore}');    // 0.0–1.0
+  print('Replay attack  : ${result.videoReplayDetected}'); // true = video replay
 },
 ```
 
@@ -684,8 +718,8 @@ The bundled model (~3.9 MB) is downloaded once and cached permanently. Add the i
 | Printed photo | Eye variance + face geometry signals in `AntiSpoofEngine` |
 | Screen replay (looped video) | FNV-1a frame hash sliding-window in `FrameHasher` |
 | Static image held to camera | Duplicate frame detection + micro-motion signal |
-| Pre-recorded live video | Micro-motion: yaw/pitch variance over 12-frame rolling window |
-| Deepfake / synthetic face | Optional TFLite model plug-in for ML-based PAD |
+| Pre-recorded live video | MiniFASNet-V2 TFLite model (`enableVideoReplayDetection: true`) + brightness variance + motion jitter heuristics |
+| Deepfake / synthetic face | FaceAntiSpoofing TFLite model (`enableTFLite: true`) |
 | Predictable action sequence | Fisher-Yates shuffle per session |
 | Session replay attack | `sessionId` generated with `Random.secure()` — cryptographically unique |
 | Identity spoofing (different person) | FaceNet cosine similarity ≥ threshold; `isFaceIdNew` signals mismatches |

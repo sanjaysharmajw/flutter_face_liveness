@@ -12,6 +12,8 @@ class LivenessResult {
     this.spoofDetected = false,
     this.deepfakeDetected = false,
     this.tfliteScore,
+    this.videoReplayScore,
+    this.videoReplayDetected = false,
     this.failureReason,
     this.sessionDurationMs,
     this.sessionId,
@@ -65,69 +67,67 @@ class LivenessResult {
   final double confidenceScore;
 
   // ── Anti-spoof ──────────────────────────────────────────────────────────
-  /// Overall human-presence verdict.
   final bool isRealHuman;
-
-  /// True if heuristic signals detected a printed photo / screen replay.
   final bool spoofDetected;
 
-  /// True if TFLite model flagged potential deepfake content.
+  /// True if the FaceAntiSpoofing TFLite model flagged potential deepfake.
   final bool deepfakeDetected;
 
-  /// Raw TFLite model output score (null when TFLite is disabled).
+  /// Raw FaceAntiSpoofing model score (null when TFLite disabled).
   final double? tfliteScore;
+
+  /// Raw MiniFASNet video-replay model score (null when disabled).
+  final double? videoReplayScore;
+
+  /// True if MiniFASNet flagged a video-replay attack.
+  final bool videoReplayDetected;
 
   // ── Meta ────────────────────────────────────────────────────────────────
   final String? failureReason;
   final int? sessionDurationMs;
-
-  /// Unique session identifier for audit trails.
   final String? sessionId;
 
-  /// Persistent face identity — same physical person always gets the same ID,
-  /// even across separate app sessions.
-  ///
-  /// Non-null only when [LivenessConfig.enableFaceId] is `true`.
-  /// Format: `FID-3A9F2B1C4E8D…` (24 hex chars).
+  /// Persistent face identity — non-null only when [LivenessConfig.enableFaceId] is true.
   final String? faceId;
-
-  /// `true`  → this face was seen for the **first time** — a new ID was created.
-  /// `false` → this face was **recognised** — the existing ID was returned.
-  /// `null`  → Face ID is disabled (`enableFaceId: false`).
   final bool? isFaceIdNew;
 
-  /// Returns a copy with [tfliteScore] set (used by LivenessController after
-  /// TFLite inference completes asynchronously at session end).
-  LivenessResult withTfliteScore(double score) => LivenessResult(
-        isSuccess: isSuccess,
-        completedActions: completedActions,
-        confidenceScore: confidenceScore,
-        isRealHuman: isRealHuman,
-        spoofDetected: spoofDetected,
-        deepfakeDetected: deepfakeDetected,
-        tfliteScore: score,
-        failureReason: failureReason,
-        sessionDurationMs: sessionDurationMs,
-        sessionId: sessionId,
-        faceId: faceId,
-        isFaceIdNew: isFaceIdNew,
-      );
+  // ── Copy helpers ─────────────────────────────────────────────────────────
 
-  /// Returns a copy with [faceId] and [isNew] set (used by LivenessController
-  /// after the identity service resolves the ID asynchronously).
-  LivenessResult withFaceId(String id, {required bool isNew}) => LivenessResult(
+  LivenessResult withTfliteResult(double score, {required bool deepfakeDetected}) =>
+      _copy(tfliteScore: score, deepfakeDetected: deepfakeDetected);
+
+  LivenessResult withTfliteScore(double score) => _copy(tfliteScore: score);
+
+  LivenessResult withVideoReplayResult(double score,
+          {required bool videoReplayDetected}) =>
+      _copy(videoReplayScore: score, videoReplayDetected: videoReplayDetected);
+
+  LivenessResult withFaceId(String id, {required bool isNew}) =>
+      _copy(faceId: id, isFaceIdNew: isNew);
+
+  LivenessResult _copy({
+    double? tfliteScore,
+    bool? deepfakeDetected,
+    double? videoReplayScore,
+    bool? videoReplayDetected,
+    String? faceId,
+    bool? isFaceIdNew,
+  }) =>
+      LivenessResult(
         isSuccess: isSuccess,
         completedActions: completedActions,
         confidenceScore: confidenceScore,
         isRealHuman: isRealHuman,
         spoofDetected: spoofDetected,
-        deepfakeDetected: deepfakeDetected,
-        tfliteScore: tfliteScore,
+        deepfakeDetected: deepfakeDetected ?? this.deepfakeDetected,
+        tfliteScore: tfliteScore ?? this.tfliteScore,
+        videoReplayScore: videoReplayScore ?? this.videoReplayScore,
+        videoReplayDetected: videoReplayDetected ?? this.videoReplayDetected,
         failureReason: failureReason,
         sessionDurationMs: sessionDurationMs,
         sessionId: sessionId,
-        faceId: id,
-        isFaceIdNew: isNew,
+        faceId: faceId ?? this.faceId,
+        isFaceIdNew: isFaceIdNew ?? this.isFaceIdNew,
       );
 
   @override
@@ -136,5 +136,6 @@ class LivenessResult {
       'score: ${confidenceScore.toStringAsFixed(2)}, '
       'spoof: $spoofDetected, '
       'deepfake: $deepfakeDetected, '
+      'videoReplay: $videoReplayDetected, '
       'actions: $completedActions)';
 }

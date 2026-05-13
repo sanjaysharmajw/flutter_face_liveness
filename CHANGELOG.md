@@ -1,3 +1,33 @@
+## 3.0.0
+
+### New Features
+
+- **Video Replay Attack Detection** — `enableVideoReplayDetection: true` adds a second TFLite model (MiniFASNet-V2, 1.7 MB) that runs alongside the existing anti-spoof model to detect pre-recorded video replay attacks. Auto-downloads and caches on first use — no manual model management.
+  - `LivenessConfig.enableVideoReplayDetection` (default `false`)
+  - `LivenessConfig.videoReplayThreshold` (default `0.50`) — score below this flags `videoReplayDetected: true`
+  - `LivenessConfig.videoReplayModelPath` / `videoReplayModelUrl` / `videoReplayInputSize` — custom model support
+  - `LivenessResult.videoReplayScore` — raw MiniFASNet real-face probability (0.0–1.0)
+  - `LivenessResult.videoReplayDetected` — `true` when a video replay attack is flagged
+  - `VideoReplayModelDownloader` — streaming HTTP download with progress, primary + fallback URL, cache validation
+
+- **Deepfake threshold** — `LivenessConfig.tfliteDeepfakeThreshold` (default `0.40`). `deepfakeDetected` is now correctly set based on TFLite real-face score vs this threshold.
+
+### Improvements
+
+- **Anti-spoof engine upgraded to 9 signals** — two new heuristic signals added:
+  - Signal 8 — Brightness variance (weight 0.12): screens have a stable backlight; real rooms flicker subtly
+  - Signal 9 — Motion jitter (weight 0.05): real humans have micro-tremors; video playback is unnaturally smooth
+  - Composite threshold raised from 0.45 → 0.50
+
+- **TFLite `_singleScore` uses softmax** — replaced raw value clamping with numerically stable softmax. Fixes incorrect 0% real-face scores when model outputs raw logits with negative values.
+
+### Bug Fixes
+
+- **`_dualScore` spoof fraction inverted** — leaf[i]=1 means a spoof vote; `realScore` is now correctly `1.0 − spoofFraction` (was using `spoofFraction` as real score, giving ~8% for real faces).
+- **`deepfakeDetected` always false** — was never set; now correctly derived from `tfliteScore < tfliteDeepfakeThreshold`.
+
+---
+
 ## 2.9.0
 
 ### New Features

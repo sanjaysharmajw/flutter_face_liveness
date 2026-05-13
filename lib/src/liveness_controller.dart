@@ -13,6 +13,7 @@ import 'camera/camera_service.dart';
 import 'ml/face_detector_service.dart';
 import 'ml/tflite_service.dart';
 import 'ml/tflite_model_downloader.dart';
+import 'ml/video_replay_model_downloader.dart';
 import 'liveness/liveness_engine.dart';
 import 'identity/face_identity_service.dart';
 
@@ -36,6 +37,7 @@ class LivenessController extends ChangeNotifier {
   final CameraService _cameraService = CameraService();
   final FaceDetectorService _faceDetector = FaceDetectorService();
   TFLiteService?        _tflite;
+  TFLiteService?        _videoReplay;
   FaceIdentityService?  _faceIdentity;
   LivenessEngine?       _engine;
 
@@ -50,7 +52,11 @@ class LivenessController extends ChangeNotifier {
   String?        _tfliteWarning;
   double?        _lastTfliteScore;
   bool           _isTfliteRunning = false;
-  Future<void>?  _tfliteFuture;  // tracked so _onEngineComplete can await it
+  Future<void>?  _tfliteFuture;
+
+  double?        _lastVideoReplayScore;
+  bool           _isVideoReplayRunning = false;
+  Future<void>?  _videoReplayFuture;
 
   // ── Public getters ──────────────────────────────────────────────────────
   bool            get isInitialized   => _isInitialized;
@@ -133,6 +139,49 @@ class LivenessController extends ChangeNotifier {
           debugPrint('[LivenessController] TFLite unavailable this session: $e');
           _tfliteWarning = 'TFLite unavailable: $e';
           _tflite = null;
+          _tfliteModelDownloadProgress = null;
+        }
+      }
+
+      // MiniFASNet video-replay detection model (optional)
+      if (_config.enableVideoReplayDetection) {
+        try {
+          String? modelPath = _config.videoReplayModelPath;
+          final downloadUrl = _config.videoReplayModelUrl ??
+              VideoReplayModelDownloader.bundledModelUrl;
+          if (modelPath == null) {
+            final downloader = VideoReplayModelDownloader(
+              modelUrl: downloadUrl,
+              onProgress: (p) {
+                _tfliteModelDownloadProgress = p;
+                notifyListeners();
+              },
+            );
+            modelPath = await downloader.ensureModel();
+            _tfliteModelDownloadProgress = null;
+            notifyListeners();
+          }
+          final inputSize = _config.videoReplayInputSize ??
+              (_config.videoReplayModelPath == null &&
+                      _config.videoReplayModelUrl == null
+                  ? VideoReplayModelDownloader.bundledInputSize
+                  : 80);
+          _videoReplay = TFLiteService(
+            modelPath: modelPath,
+            inputSize: inputSize,
+            realClassIndex: VideoReplayModelDownloader.bundledRealClassIndex,
+          );
+          final loaded = await _videoReplay!.load();
+          if (!loaded) {
+            if (!modelPath.startsWith('assets/')) {
+              await VideoReplayModelDownloader.clearCache();
+            }
+            debugPrint('[LivenessController] VideoReplay model failed to load');
+            _videoReplay = null;
+          }
+        } catch (e) {
+          debugPrint('[LivenessController] VideoReplay unavailable: $e');
+          _videoReplay = null;
           _tfliteModelDownloadProgress = null;
         }
       }
@@ -247,6 +296,26 @@ class LivenessController extends ChangeNotifier {
       }
     }
 
+    // Video-replay inference (MiniFASNet) — same guard pattern as TFLite
+    if (_videoReplay != null && !_isVideoReplayRunning) {
+      if (rawForTflite != null && faceForTflite != null) {
+        _isVideoReplayRunning = true;
+        _videoReplayFuture = _videoReplay!.run(
+          imageBytes:        rawForTflite.imageBytes,
+          imageWidth:        rawForTflite.imageWidth,
+          imageHeight:       rawForTflite.imageHeight,
+          faceBoundingBox:   faceForTflite.boundingBox,
+          sensorOrientation: rawForTflite.sensorOrientation,
+        ).then((r) {
+          if (_isDisposed) return;
+          _isVideoReplayRunning = false;
+          if (r != null) _lastVideoReplayScore = r.realScore;
+          _videoReplayFuture = null;
+        });
+        unawaited(_videoReplayFuture!);
+      }
+    }
+
     _engine?.processFrame(result.faces, quality: result.quality);
     notifyListeners();
   }
@@ -261,9 +330,33 @@ class LivenessController extends ChangeNotifier {
       await _tfliteFuture;
     }
 
-    // Attach the most recent TFLite anti-spoof score to the result
+    // Await any in-flight video-replay inference
+    if (_isVideoReplayRunning && _videoReplayFuture != null) {
+      await _videoReplayFuture;
+    }
+
+    // Attach video-replay score to result
+    if (_lastVideoReplayScore != null) {
+      final isReplay = _lastVideoReplayScore! < _config.videoReplayThreshold;
+      finalResult = finalResult.withVideoReplayResult(
+        _lastVideoReplayScore!,
+        videoReplayDetected: isReplay,
+      );
+      if (isReplay) {
+        debugPrint('[LivenessController] Video replay attack detected — score=${_lastVideoReplayScore!.toStringAsFixed(3)}');
+      }
+    }
+
+    // Attach TFLite score + deepfake flag to the result
     if (_lastTfliteScore != null) {
-      finalResult = finalResult.withTfliteScore(_lastTfliteScore!);
+      final isDeepfake = _lastTfliteScore! < _config.tfliteDeepfakeThreshold;
+      finalResult = finalResult.withTfliteResult(
+        _lastTfliteScore!,
+        deepfakeDetected: isDeepfake,
+      );
+      if (isDeepfake) {
+        debugPrint('[LivenessController] Deepfake flagged — tfliteScore=${_lastTfliteScore!.toStringAsFixed(3)} < threshold=${_config.tfliteDeepfakeThreshold}');
+      }
     }
 
     // Resolve persistent faceId after successful liveness
@@ -303,6 +396,9 @@ class LivenessController extends ChangeNotifier {
     _isTfliteRunning             = false;
     _tfliteFuture                = null;
     _tfliteModelDownloadProgress = null;
+    _lastVideoReplayScore        = null;
+    _isVideoReplayRunning        = false;
+    _videoReplayFuture           = null;
     notifyListeners();
   }
 
@@ -317,6 +413,7 @@ class LivenessController extends ChangeNotifier {
     await _cameraService.dispose();
     await _faceDetector.dispose();
     _tflite?.dispose();
+    _videoReplay?.dispose();
     _faceIdentity?.dispose();
     _engine?.dispose();
     super.dispose();

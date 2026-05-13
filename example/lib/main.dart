@@ -197,7 +197,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       _ChallengeCard(
                         icon: Icons.psychology_outlined,
                         title: 'With TFLite Anti-Spoof',
-                        subtitle: 'Place model at example/assets/anti_spoof.tflite',
+                        subtitle: 'TFLite anti-spoof + video replay detection',
                         accentColor: _error,
                         onTap: () => _launchWithTFLite(context),
                       ),
@@ -261,6 +261,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await Navigator.of(ctx).push(_fade(const LivenessScreen(
       actions: [LivenessAction.blink, LivenessAction.turnLeft],
       enableTFLite: true,
+      enableVideoReplay: true,
     )));
   }
 
@@ -352,10 +353,12 @@ class LivenessScreen extends StatelessWidget {
     required this.actions,
     this.enableFaceId = false,
     this.enableTFLite = true,
+    this.enableVideoReplay = false,
   });
   final List<LivenessAction> actions;
   final bool enableFaceId;
   final bool enableTFLite;
+  final bool enableVideoReplay;
 
   @override
   Widget build(BuildContext context) {
@@ -368,6 +371,7 @@ class LivenessScreen extends StatelessWidget {
         enableBlurDetection: true,
         enableFaceId: enableFaceId,
         enableTFLite: enableTFLite,
+        enableVideoReplayDetection: enableVideoReplay,
         showDebugOverlay: false,
       ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
@@ -566,33 +570,43 @@ class _StatsCard extends StatelessWidget {
             accent: result.spoofDetected ? _error : _success,
           ),
           _divider(),
-          _StatTile(
-            icon: Icons.psychology_outlined,
-            label: 'TFLite Anti-Spoof Score',
-            value: result.tfliteScore != null
-                ? '${(result.tfliteScore! * 100).toStringAsFixed(1)}% real'
-                : 'null (TFLite not enabled or model missing)',
-            accent: result.tfliteScore == null
-                ? _textSecondary
-                : result.tfliteScore! > 0.5
-                    ? _success
-                    : _error,
-          ),
+          result.tfliteScore != null
+              ? _ScoreBarTile(
+                  icon: result.deepfakeDetected
+                      ? Icons.warning_amber_rounded
+                      : Icons.security_rounded,
+                  label: 'Deepfake / Anti-Spoof',
+                  status: result.deepfakeDetected
+                      ? 'Spoofed / Deepfake'
+                      : 'Genuine Face',
+                  realScore: result.tfliteScore!,
+                  accent: result.deepfakeDetected ? _error : _success,
+                )
+              : _StatTile(
+                  icon: Icons.help_outline_rounded,
+                  label: 'Deepfake / Anti-Spoof',
+                  value: 'N/A — TFLite not enabled',
+                  accent: _textSecondary,
+                ),
           _divider(),
-          _StatTile(
-            icon: result.deepfakeDetected
-                ? Icons.warning_amber_rounded
-                : Icons.verified_user_outlined,
-            label: 'Deepfake Detection',
-            value: result.tfliteScore != null
-                ? (result.deepfakeDetected ? 'Deepfake Flagged' : 'No Deepfake')
-                : 'N/A',
-            accent: result.tfliteScore == null
-                ? _textSecondary
-                : result.deepfakeDetected
-                    ? _error
-                    : _success,
-          ),
+          result.videoReplayScore != null
+              ? _ScoreBarTile(
+                  icon: result.videoReplayDetected
+                      ? Icons.videocam_off_rounded
+                      : Icons.videocam_rounded,
+                  label: 'Video Replay Detection',
+                  status: result.videoReplayDetected
+                      ? 'Video Replay Attack!'
+                      : 'Live Face',
+                  realScore: result.videoReplayScore!,
+                  accent: result.videoReplayDetected ? _error : _success,
+                )
+              : _StatTile(
+                  icon: Icons.help_outline_rounded,
+                  label: 'Video Replay Detection',
+                  value: 'N/A — Video Replay model not enabled',
+                  accent: _textSecondary,
+                ),
           if (result.faceId != null) ...[
             _divider(),
             _FaceIdMatchCard(
@@ -942,6 +956,65 @@ class _GradientButton extends StatelessWidget {
               fontSize: 16,
               fontWeight: FontWeight.w700),
         ),
+      ),
+    );
+  }
+}
+
+class _ScoreBarTile extends StatelessWidget {
+  const _ScoreBarTile({
+    required this.icon,
+    required this.label,
+    required this.status,
+    required this.realScore,
+    required this.accent,
+  });
+  final IconData icon;
+  final String label;
+  final String status;
+  final double realScore;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final real = realScore.clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, color: accent, size: 17),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(color: _textSecondary, fontSize: 11)),
+                const SizedBox(height: 2),
+                Text(status,
+                    style: TextStyle(
+                        color: accent,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 3),
+                Text('${(real * 100).toStringAsFixed(1)}% real',
+                    style: TextStyle(
+                        color: accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

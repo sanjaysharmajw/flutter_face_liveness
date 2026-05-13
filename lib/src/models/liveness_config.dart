@@ -31,6 +31,14 @@ class LivenessConfig {
     this.tfliteModelPath,
     this.tfliteModelUrl,
     this.tfliteInputSize,
+    this.tfliteDeepfakeThreshold = 0.40,
+
+    // ── Video Replay Detection (optional) ───────────────────────────────
+    this.enableVideoReplayDetection = false,
+    this.videoReplayModelPath,
+    this.videoReplayModelUrl,
+    this.videoReplayInputSize,
+    this.videoReplayThreshold = 0.50,
 
     // ── Face geometry ────────────────────────────────────────────────────
     this.faceTooFarRatio = 0.015,
@@ -108,6 +116,28 @@ class LivenessConfig {
   /// When null the package uses the bundled model's required size (256).
   final int? tfliteInputSize;
 
+  /// TFLite real-score below this threshold flags [LivenessResult.deepfakeDetected].
+  /// Range 0.0–1.0. Default 0.40 — scores under 40% real confidence = deepfake/spoof.
+  final double tfliteDeepfakeThreshold;
+
+  // ── Video Replay Detection ────────────────────────────────────────────────
+  /// Enable MiniFASNet-based video-replay attack detection (second TFLite model).
+  final bool enableVideoReplayDetection;
+
+  /// Local asset path or absolute filesystem path for the video-replay model.
+  final String? videoReplayModelPath;
+
+  /// HTTPS URL to auto-download the MiniFASNet video-replay model from.
+  /// When null, the bundled MiniFASNetV2 model URL is used.
+  final String? videoReplayModelUrl;
+
+  /// Input size for the video-replay model (square). Default: 80 (MiniFASNet).
+  final int? videoReplayInputSize;
+
+  /// Real-score below this threshold flags [LivenessResult.videoReplayDetected].
+  /// Default 0.50 — scores under 50% = video replay attack.
+  final double videoReplayThreshold;
+
   // ── Face geometry ─────────────────────────────────────────────────────────
   final double faceTooFarRatio;
   final double faceTooCloseRatio;
@@ -162,6 +192,12 @@ class LivenessConfig {
     String? tfliteModelPath,
     String? tfliteModelUrl,
     int? tfliteInputSize,
+    double? tfliteDeepfakeThreshold,
+    bool? enableVideoReplayDetection,
+    String? videoReplayModelPath,
+    String? videoReplayModelUrl,
+    int? videoReplayInputSize,
+    double? videoReplayThreshold,
     double? faceTooFarRatio,
     double? faceTooCloseRatio,
     bool? enableDuplicateFrameDetection,
@@ -187,6 +223,12 @@ class LivenessConfig {
       tfliteModelPath: tfliteModelPath ?? this.tfliteModelPath,
       tfliteModelUrl: tfliteModelUrl ?? this.tfliteModelUrl,
       tfliteInputSize: tfliteInputSize ?? this.tfliteInputSize,
+      tfliteDeepfakeThreshold: tfliteDeepfakeThreshold ?? this.tfliteDeepfakeThreshold,
+      enableVideoReplayDetection: enableVideoReplayDetection ?? this.enableVideoReplayDetection,
+      videoReplayModelPath: videoReplayModelPath ?? this.videoReplayModelPath,
+      videoReplayModelUrl: videoReplayModelUrl ?? this.videoReplayModelUrl,
+      videoReplayInputSize: videoReplayInputSize ?? this.videoReplayInputSize,
+      videoReplayThreshold: videoReplayThreshold ?? this.videoReplayThreshold,
       faceTooFarRatio: faceTooFarRatio ?? this.faceTooFarRatio,
       faceTooCloseRatio: faceTooCloseRatio ?? this.faceTooCloseRatio,
       enableDuplicateFrameDetection:

@@ -35,10 +35,13 @@ class TFLiteResult {
 // ══════════════════════════════════════════════════════════════════════════════
 
 class _InitMsg {
-  const _InitMsg(this.modelBytes, this.inputSize, this.replyPort);
+  const _InitMsg(this.modelBytes, this.inputSize, this.replyPort, {this.realClassIndex = 0});
   final Uint8List modelBytes;
   final int inputSize;
   final SendPort replyPort;
+  // Index in the output tensor that holds the "real" class score.
+  // 0 = bundled FaceAntiSpoofing model, 1 = MiniFASNet format [spoof, real].
+  final int realClassIndex;
 }
 
 class _RunMsg {
@@ -116,23 +119,16 @@ void _tfliteWorker(_InitMsg init) {
               msg.bboxLeft, msg.bboxTop, msg.bboxRight, msg.bboxBottom,
               msg.sensorOrientation, init.inputSize);
 
-      if (input == null) {
-        init.replyPort.send(_ResultMsg(msg.id));
-        return;
-      }
-
       interp!.getInputTensor(0).data = input.buffer.asUint8List();
       interp.invoke();
 
       final out0 = interp.getOutputTensor(0).data.buffer.asFloat32List();
-      debugPrint('[TFLite] outCount=$outCount  out0=${out0.take(4).toList()}');
       _ResultMsg result;
       if (outCount >= 2) {
         final out1 = interp.getOutputTensor(1).data.buffer.asFloat32List();
-        debugPrint('[TFLite] out1=${out1.take(4).toList()}');
         result = _dualScore(msg.id, out0, out1);
       } else {
-        result = _singleScore(msg.id, out0);
+        result = _singleScore(msg.id, out0, init.realClassIndex);
       }
       init.replyPort.send(result);
     } catch (e) {
@@ -214,14 +210,16 @@ Float32List _nv21Float32(
   return out;
 }
 
-_ResultMsg _singleScore(int id, Float32List out) {
-  if (out.length >= 2) {
-    // FaceAntiSpoofing model: index 0 = real, index 1 = spoof
-    final r = out[0].clamp(0.0, 1.0);
-    final s = out[1].clamp(0.0, 1.0);
-    return _ResultMsg(id, realScore: r, spoofScore: s);
-  }
-  return _ResultMsg(id, realScore: 0.5, spoofScore: 0.5);
+_ResultMsg _singleScore(int id, Float32List out, int realIdx) {
+  if (out.length < 2) return _ResultMsg(id, realScore: 0.5, spoofScore: 0.5);
+  // Softmax handles both raw logits and pre-softmaxed outputs correctly
+  final maxV = out.reduce(math.max);
+  final e0   = math.exp(out[0] - maxV);
+  final e1   = math.exp(out[1] - maxV);
+  final sum  = e0 + e1;
+  final r = (realIdx == 0 ? e0 : e1) / sum;
+  final s = (realIdx == 0 ? e1 : e0) / sum;
+  return _ResultMsg(id, realScore: r, spoofScore: s);
 }
 
 _ResultMsg _dualScore(int id, Float32List clss, Float32List leaf) {
@@ -235,7 +233,6 @@ _ResultMsg _dualScore(int id, Float32List clss, Float32List leaf) {
   spoofFraction = spoofFraction.clamp(0.0, 1.0);
   // leaf[i]=1 means spoof vote, so spoofFraction = spoof score
   final realScore = 1.0 - spoofFraction;
-  debugPrint('[TFLite] spoofFraction=$spoofFraction  realScore=$realScore');
   return _ResultMsg(id, realScore: realScore, spoofScore: spoofFraction);
 }
 
@@ -248,10 +245,18 @@ _ResultMsg _dualScore(int id, Float32List clss, Float32List leaf) {
 /// All inference and preprocessing happens off the main thread — the camera
 /// preview and blink/head-movement detection are never blocked.
 class TFLiteService {
-  TFLiteService({required this.modelPath, required this.inputSize});
+  TFLiteService({
+    required this.modelPath,
+    required this.inputSize,
+    this.realClassIndex = 0,
+  });
 
   final String modelPath;
   final int inputSize;
+  /// Index in the single-tensor output that holds the "real" class score.
+  /// 0 = bundled FaceAntiSpoofing model (out[0]=real).
+  /// 1 = MiniFASNet format (out[0]=spoof, out[1]=real).
+  final int realClassIndex;
 
   bool         _isLoaded   = false;
   Isolate?     _isolate;
@@ -299,7 +304,8 @@ class TFLiteService {
 
       _isolate = await Isolate.spawn(
         _tfliteWorker,
-        _InitMsg(modelBytes, inputSize, _mainPort!.sendPort),
+        _InitMsg(modelBytes, inputSize, _mainPort!.sendPort,
+            realClassIndex: realClassIndex),
       );
 
       final ready = await readyCompleter.future.timeout(
