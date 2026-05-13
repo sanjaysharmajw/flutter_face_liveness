@@ -169,7 +169,7 @@ onSuccess: (result) {
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^2.6.0
+  flutter_face_liveness: ^2.8.0
 ```
 
 ### 2. Platform permissions
@@ -593,12 +593,14 @@ await controller.dispose();              // release all resources
 
 The package includes a plug-in interface for a custom deepfake / presentation-attack-detection model. Use this to layer additional ML-based anti-spoof on top of the built-in heuristics.
 
+Inference runs automatically on every frame where a face is detected. The most recent score is attached to `LivenessResult.tfliteScore` at session end.
+
 ### Expected model contract
 
 | Property | Requirement |
 |----------|------------|
 | Input shape | `[1, H, W, 3]` float32 |
-| Input range | `0.0–1.0` (BGR, normalised) |
+| Input range | `0.0–1.0` (RGB, normalised) |
 | Output shape | `[1, 2]` |
 | Output meaning | `[real_probability, spoof_probability]` |
 
@@ -617,22 +619,24 @@ The package includes a plug-in interface for a custom deepfake / presentation-at
        - assets/anti_spoof.tflite
    ```
 
-3. Pass the path via config:
+3. Pass the asset key via config:
    ```dart
    config: LivenessConfig(
      enableTFLite: true,
-     tfliteModelPath: 'assets/anti_spoof.tflite',
-     tfliteInputSize: 128,  // or 256, 224, etc.
+     tfliteModelPath: 'assets/anti_spoof.tflite',  // asset key or absolute path
+     tfliteInputSize: 128,  // match your model's expected input size
    ),
    ```
 
 4. Read the result:
    ```dart
    onSuccess: (result) {
-     print('TFLite score : ${result.tfliteScore}');
+     print('TFLite score : ${result.tfliteScore}');   // 0.0–1.0 real-face probability
      print('Deepfake     : ${result.deepfakeDetected}');
    },
    ```
+
+> **Note:** `tfliteModelPath` accepts either a Flutter asset key (e.g. `'assets/anti_spoof.tflite'`) or an absolute filesystem path obtained via `path_provider`.
 
 ## Performance
 

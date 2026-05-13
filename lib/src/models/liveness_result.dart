@@ -96,6 +96,23 @@ class LivenessResult {
   /// `null`  → Face ID is disabled (`enableFaceId: false`).
   final bool? isFaceIdNew;
 
+  /// Returns a copy with [tfliteScore] set (used by LivenessController after
+  /// TFLite inference completes asynchronously at session end).
+  LivenessResult withTfliteScore(double score) => LivenessResult(
+        isSuccess: isSuccess,
+        completedActions: completedActions,
+        confidenceScore: confidenceScore,
+        isRealHuman: isRealHuman,
+        spoofDetected: spoofDetected,
+        deepfakeDetected: deepfakeDetected,
+        tfliteScore: score,
+        failureReason: failureReason,
+        sessionDurationMs: sessionDurationMs,
+        sessionId: sessionId,
+        faceId: faceId,
+        isFaceIdNew: isFaceIdNew,
+      );
+
   /// Returns a copy with [faceId] and [isNew] set (used by LivenessController
   /// after the identity service resolves the ID asynchronously).
   LivenessResult withFaceId(String id, {required bool isNew}) => LivenessResult(

@@ -85,8 +85,8 @@ class LivenessConfig {
   /// Enable TensorFlow Lite model for advanced anti-spoof inference.
   final bool enableTFLite;
 
-  /// Absolute path to a .tflite model file on the device.
-  /// Required when [enableTFLite] is true.
+  /// Flutter asset key (e.g. `'assets/anti_spoof.tflite'`) or absolute
+  /// filesystem path for the .tflite model. Required when [enableTFLite] is true.
   final String? tfliteModelPath;
 
   /// Input image size expected by the TFLite model (square).

@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 
@@ -43,6 +45,8 @@ class LivenessController extends ChangeNotifier {
   RawFrameData?  _lastRawFrame;
   String?        _error;
   double?        _faceIdModelDownloadProgress;
+  double?        _lastTfliteScore;
+  bool           _isTfliteRunning = false;
 
   // ── Public getters ──────────────────────────────────────────────────────
   bool            get isInitialized   => _isInitialized;
@@ -138,7 +142,7 @@ class LivenessController extends ChangeNotifier {
       image,
       camera.sensorOrientation,
       camera.lensDirection,
-      captureRawFrame: _config.enableFaceId,
+      captureRawFrame: _config.enableFaceId || _config.enableTFLite,
     );
 
     if (_isDisposed) return;
@@ -147,12 +151,37 @@ class LivenessController extends ChangeNotifier {
     _lastQuality  = result.quality;
     if (result.rawFrame != null) _lastRawFrame = result.rawFrame;
 
+    // Fire TFLite anti-spoof inference async; result is stored in _lastTfliteScore
+    // and attached to LivenessResult at session end. Guard with _isTfliteRunning
+    // so frames don't queue up if inference is slower than the camera rate.
+    final rawForTflite  = result.rawFrame;
+    final faceForTflite = _currentFace;
+    if (_tflite != null && rawForTflite != null && faceForTflite != null && !_isTfliteRunning) {
+      _isTfliteRunning = true;
+      unawaited(_tflite!.run(
+        imageBytes:        rawForTflite.imageBytes,
+        imageWidth:        rawForTflite.imageWidth,
+        imageHeight:       rawForTflite.imageHeight,
+        faceBoundingBox:   faceForTflite.boundingBox,
+        sensorOrientation: rawForTflite.sensorOrientation,
+      ).then((tfliteResult) {
+        if (_isDisposed) return;
+        _isTfliteRunning = false;
+        if (tfliteResult != null) _lastTfliteScore = tfliteResult.realScore;
+      }));
+    }
+
     _engine.processFrame(result.faces, quality: result.quality);
     notifyListeners();
   }
 
   Future<void> _onEngineComplete(LivenessResult result) async {
     var finalResult = result;
+
+    // Attach the most recent TFLite anti-spoof score to the result
+    if (_lastTfliteScore != null) {
+      finalResult = finalResult.withTfliteScore(_lastTfliteScore!);
+    }
 
     // Resolve persistent faceId after successful liveness
     if (result.isSuccess && _faceIdentity != null && _currentFace != null) {
@@ -166,7 +195,7 @@ class LivenessController extends ChangeNotifier {
           sensorOrientation: raw.sensorOrientation,
         );
         if (match != null) {
-          finalResult = result.withFaceId(match.faceId, isNew: match.isNew);
+          finalResult = finalResult.withFaceId(match.faceId, isNew: match.isNew);
         }
       }
     }
@@ -184,9 +213,11 @@ class LivenessController extends ChangeNotifier {
   Future<void> reset() async {
     if (!_isInitialized) return;
     _engine.reset(_actions);
-    _currentFace  = null;
-    _lastQuality  = null;
-    _lastRawFrame = null;
+    _currentFace      = null;
+    _lastQuality      = null;
+    _lastRawFrame     = null;
+    _lastTfliteScore  = null;
+    _isTfliteRunning  = false;
     notifyListeners();
   }
 

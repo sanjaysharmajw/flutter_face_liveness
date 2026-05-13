@@ -1,3 +1,19 @@
+## 2.8.0
+
+### Bug Fixes
+
+- **TFLite inference was never executed** — `TFLiteService.load()` printed a success log but never instantiated an `Interpreter`; `TFLiteService.run()` returned `null` immediately because `_interpreter` was always `null`; `LivenessController._processFrame()` never called `_tflite?.run()` during frame processing. Net effect: `LivenessResult.tfliteScore` was always `null` regardless of `enableTFLite: true`.
+  - Fixed `TFLiteService.load()` to call `Interpreter.fromFile()` (absolute path) or `Interpreter.fromAsset()` (Flutter asset key) depending on whether `tfliteModelPath` starts with `/`.
+  - Fixed `TFLiteService.run()` — now accepts raw camera frame bytes + face bounding box + sensor orientation, internally crops and resizes the face region to `inputSize × inputSize`, and calls `_interpreter!.runForMultipleInputs()` for real inference.
+  - Fixed `LivenessController._processFrame()` to fire `_tflite!.run()` asynchronously on every frame where a face is detected; `_isTfliteRunning` guard prevents frame queue-up when inference is slower than the camera rate.
+  - Fixed `LivenessController._onEngineComplete()` to attach the cached `_lastTfliteScore` to `LivenessResult` via the new `withTfliteScore()` method.
+  - Added `LivenessResult.withTfliteScore()` helper (mirrors the existing `withFaceId()` pattern).
+  - `captureRawFrame` in `_processFrame()` is now also enabled when `enableTFLite: true` (was only enabled for `enableFaceId`).
+
+- **`tfliteModelPath` accepted asset paths in docs but required absolute paths in code** — updated `LivenessConfig.tfliteModelPath` documentation and `TFLiteService.load()` to explicitly support both Flutter asset keys and absolute filesystem paths.
+
+---
+
 ## 2.7.0
 
 ### Bug Fixes
