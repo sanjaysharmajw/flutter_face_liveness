@@ -29,6 +29,7 @@ class LivenessConfig {
     // ── TFLite (optional) ────────────────────────────────────────────────
     this.enableTFLite = false,
     this.tfliteModelPath,
+    this.tfliteModelUrl,
     this.tfliteInputSize = 128,
 
     // ── Face geometry ────────────────────────────────────────────────────
@@ -86,8 +87,23 @@ class LivenessConfig {
   final bool enableTFLite;
 
   /// Flutter asset key (e.g. `'assets/anti_spoof.tflite'`) or absolute
-  /// filesystem path for the .tflite model. Required when [enableTFLite] is true.
+  /// filesystem path for the .tflite model.
+  ///
+  /// When null and [tfliteModelUrl] is set, the model is auto-downloaded on
+  /// first use and cached permanently — no manual file management needed.
   final String? tfliteModelPath;
+
+  /// HTTPS URL to auto-download the TFLite model from on first use.
+  ///
+  /// Ignored when [tfliteModelPath] is already set. The downloaded file is
+  /// cached permanently in the app documents directory; subsequent sessions
+  /// load from cache instantly with no network activity.
+  ///
+  /// Example — upload your .tflite file to GitHub Releases and set:
+  /// ```dart
+  /// tfliteModelUrl: 'https://github.com/you/repo/releases/download/v1/model.tflite'
+  /// ```
+  final String? tfliteModelUrl;
 
   /// Input image size expected by the TFLite model (square).
   final int tfliteInputSize;
@@ -144,6 +160,7 @@ class LivenessConfig {
     double? blurThreshold,
     bool? enableTFLite,
     String? tfliteModelPath,
+    String? tfliteModelUrl,
     int? tfliteInputSize,
     double? faceTooFarRatio,
     double? faceTooCloseRatio,
@@ -168,6 +185,7 @@ class LivenessConfig {
       blurThreshold: blurThreshold ?? this.blurThreshold,
       enableTFLite: enableTFLite ?? this.enableTFLite,
       tfliteModelPath: tfliteModelPath ?? this.tfliteModelPath,
+      tfliteModelUrl: tfliteModelUrl ?? this.tfliteModelUrl,
       tfliteInputSize: tfliteInputSize ?? this.tfliteInputSize,
       faceTooFarRatio: faceTooFarRatio ?? this.faceTooFarRatio,
       faceTooCloseRatio: faceTooCloseRatio ?? this.faceTooCloseRatio,

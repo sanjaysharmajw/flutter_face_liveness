@@ -102,7 +102,10 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
   Widget _loadingView() {
     return Consumer<LivenessController>(
       builder: (_, ctrl, __) {
-        final dlProgress = ctrl.faceIdModelDownloadProgress;
+        final faceIdProgress  = ctrl.faceIdModelDownloadProgress;
+        final tfliteProgress  = ctrl.tfliteModelDownloadProgress;
+        final dlProgress      = tfliteProgress ?? faceIdProgress;
+        final isTfliteDl      = tfliteProgress != null;
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -119,7 +122,9 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
               const SizedBox(height: 20),
               Text(
                 dlProgress != null
-                    ? 'Downloading Face ID model… ${(dlProgress * 100).toInt()}%'
+                    ? isTfliteDl
+                        ? 'Downloading Anti-Spoof model… ${(dlProgress * 100).toInt()}%'
+                        : 'Downloading Face ID model… ${(dlProgress * 100).toInt()}%'
                     : 'Starting camera…',
                 style: TextStyle(
                   color: _isDark ? Colors.white54 : Colors.black45,
@@ -130,7 +135,7 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
               if (dlProgress != null) ...[
                 const SizedBox(height: 10),
                 Text(
-                  'One-time download (~23 MB)',
+                  'One-time download — cached for future sessions',
                   style: TextStyle(
                     color: _isDark ? Colors.white30 : Colors.black26,
                     fontSize: 11,
@@ -263,6 +268,33 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
             isDark: _isDark,
           ),
         ),
+
+        // TFLite warning banner
+        if (ctrl.tfliteWarning != null)
+          Positioned(
+            bottom: MediaQuery.of(context).padding.bottom + 130,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      ctrl.tfliteWarning!,
+                      style: const TextStyle(color: Colors.white, fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
         // Debug overlay
         if (widget.config.showDebugOverlay || widget.showDebugInfo)

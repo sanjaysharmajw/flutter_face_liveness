@@ -35,7 +35,8 @@ export 'src/models/frame_quality.dart';
 
 // ML / security (useful for advanced integrations)
 export 'src/ml/anti_spoof_engine.dart' show AntiSpoofEngine, AntiSpoofResult;
-export 'src/ml/tflite_service.dart'    show TFLiteService;
+export 'src/ml/tflite_service.dart'          show TFLiteService;
+export 'src/ml/tflite_model_downloader.dart' show TFLiteModelDownloader, TFLiteModelDownloadException;
 export 'src/security/session_manager.dart' show SessionManager;
 
 // Face identity

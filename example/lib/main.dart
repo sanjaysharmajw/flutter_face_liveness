@@ -193,6 +193,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         accentColor: _success,
                         onTap: () => _launchWithFaceId(context),
                       ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.psychology_outlined,
+                        title: 'With TFLite Anti-Spoof',
+                        subtitle: 'Place model at example/assets/anti_spoof.tflite',
+                        accentColor: _error,
+                        onTap: () => _launchWithTFLite(context),
+                      ),
                     ],
                   ),
                 ),
@@ -243,6 +251,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await Navigator.of(ctx).push(_fade(LivenessScreen(actions: actions)));
   }
 
+  Future<void> _launchWithTFLite(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(const LivenessScreen(
+      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+      enableTFLite: true,
+    )));
+  }
+
   Future<void> _launchWithFaceId(BuildContext ctx) async {
     final status = await Permission.camera.request();
     if (!ctx.mounted) return;
@@ -255,7 +276,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       enableFaceId: true,
     )));
     // Refresh face ID list after returning from liveness screen
-    if (mounted) _loadFaceIds();
+    if (mounted) await _loadFaceIds();
   }
 
   void _showPermissionSheet(BuildContext ctx) {
@@ -330,9 +351,11 @@ class LivenessScreen extends StatelessWidget {
     super.key,
     required this.actions,
     this.enableFaceId = false,
+    this.enableTFLite = true,
   });
   final List<LivenessAction> actions;
   final bool enableFaceId;
+  final bool enableTFLite;
 
   @override
   Widget build(BuildContext context) {
@@ -344,6 +367,11 @@ class LivenessScreen extends StatelessWidget {
         enableBrightnessCheck: true,
         enableBlurDetection: true,
         enableFaceId: enableFaceId,
+        enableTFLite: enableTFLite,
+        tfliteModelUrl: enableTFLite
+            ? 'https://github.com/sanjaysharmajw/flutter_face_liveness/releases/download/v2.0.0-models/FaceAntiSpoofing.tflite'
+            : null,
+        tfliteInputSize: enableTFLite ? 256 : 128,
         showDebugOverlay: false,
       ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
@@ -402,7 +430,7 @@ class _ResultScreenState extends State<ResultScreen>
         children: [
           const _LightBackground(),
           SafeArea(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 children: [
@@ -456,6 +484,7 @@ class _ResultScreenState extends State<ResultScreen>
                             shadowColor: color,
                             onTap: () => Navigator.of(context).pop(),
                           ),
+                          const SizedBox(height: 32),
                         ],
                       ),
                     ),
@@ -539,6 +568,34 @@ class _StatsCard extends StatelessWidget {
             label: 'Anti-Spoof',
             value: result.spoofDetected ? 'Spoof Detected' : 'Passed',
             accent: result.spoofDetected ? _error : _success,
+          ),
+          _divider(),
+          _StatTile(
+            icon: Icons.psychology_outlined,
+            label: 'TFLite Anti-Spoof Score',
+            value: result.tfliteScore != null
+                ? '${(result.tfliteScore! * 100).toStringAsFixed(1)}% real'
+                : 'null (TFLite not enabled or model missing)',
+            accent: result.tfliteScore == null
+                ? _textSecondary
+                : result.tfliteScore! > 0.5
+                    ? _success
+                    : _error,
+          ),
+          _divider(),
+          _StatTile(
+            icon: result.deepfakeDetected
+                ? Icons.warning_amber_rounded
+                : Icons.verified_user_outlined,
+            label: 'Deepfake Detection',
+            value: result.tfliteScore != null
+                ? (result.deepfakeDetected ? 'Deepfake Flagged' : 'No Deepfake')
+                : 'N/A',
+            accent: result.tfliteScore == null
+                ? _textSecondary
+                : result.deepfakeDetected
+                    ? _error
+                    : _success,
           ),
           if (result.faceId != null) ...[
             _divider(),

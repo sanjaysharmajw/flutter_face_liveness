@@ -12,6 +12,7 @@ import 'models/frame_quality.dart';
 import 'camera/camera_service.dart';
 import 'ml/face_detector_service.dart';
 import 'ml/tflite_service.dart';
+import 'ml/tflite_model_downloader.dart';
 import 'liveness/liveness_engine.dart';
 import 'identity/face_identity_service.dart';
 
@@ -36,7 +37,7 @@ class LivenessController extends ChangeNotifier {
   final FaceDetectorService _faceDetector = FaceDetectorService();
   TFLiteService?        _tflite;
   FaceIdentityService?  _faceIdentity;
-  late LivenessEngine   _engine;
+  LivenessEngine?       _engine;
 
   bool _isInitialized = false;
   bool _isDisposed    = false;
@@ -45,11 +46,23 @@ class LivenessController extends ChangeNotifier {
   RawFrameData?  _lastRawFrame;
   String?        _error;
   double?        _faceIdModelDownloadProgress;
+  double?        _tfliteModelDownloadProgress;
+  String?        _tfliteWarning;
   double?        _lastTfliteScore;
   bool           _isTfliteRunning = false;
+  Future<void>?  _tfliteFuture;  // tracked so _onEngineComplete can await it
 
   // ── Public getters ──────────────────────────────────────────────────────
   bool            get isInitialized   => _isInitialized;
+  /// True when [LivenessConfig.enableTFLite] is set and the model loaded
+  /// successfully. False means [LivenessResult.tfliteScore] will be null.
+  bool            get isTFLiteLoaded  => _tflite != null;
+  /// Non-null when [enableTFLite] is true but the model could not be loaded
+  /// (download failed, model file missing, or corrupted cache).
+  String?         get tfliteWarning   => _tfliteWarning;
+  /// Non-null (0.0–1.0) while the TFLite anti-spoof model is being downloaded
+  /// for the first time. Null when loading from cache or when complete.
+  double?         get tfliteModelDownloadProgress => _tfliteModelDownloadProgress;
   /// Non-null (0.0–1.0) while the FaceNet model is being downloaded for the
   /// first time. Null when loading from cache or when download is complete.
   double?         get faceIdModelDownloadProgress => _faceIdModelDownloadProgress;
@@ -59,46 +72,88 @@ class LivenessController extends ChangeNotifier {
   CameraController? get cameraController => _cameraService.controller;
 
   DetectionStatus get status =>
-      _isInitialized ? _engine.status : DetectionStatus.initializing;
+      _isInitialized ? _engine!.status : DetectionStatus.initializing;
   LivenessAction? get currentAction  =>
-      _isInitialized ? _engine.currentAction : null;
-  double  get progress          => _isInitialized ? _engine.progress             : 0.0;
-  int     get completedCount    => _isInitialized ? _engine.completedActions.length : 0;
+      _isInitialized ? _engine!.currentAction : null;
+  double  get progress          => _isInitialized ? _engine!.progress             : 0.0;
+  int     get completedCount    => _isInitialized ? _engine!.completedActions.length : 0;
   int     get totalActions      => _actions.length;
-  bool    get isComplete        => _isInitialized && _engine.isComplete;
-  String? get sessionId         => _isInitialized ? _engine.sessionId           : null;
+  bool    get isComplete        => _isInitialized && (_engine?.isComplete ?? false);
+  String? get sessionId         => _isInitialized ? _engine!.sessionId           : null;
   LivenessConfig get config     => _config;
   List<LivenessAction> get completedActions =>
-      _isInitialized ? _engine.completedActions : const [];
+      _isInitialized ? _engine!.completedActions : const [];
   List<LivenessAction> get remainingActions =>
-      _isInitialized ? _engine.remainingActions : _actions;
+      _isInitialized ? _engine!.remainingActions : _actions;
 
   // ── Initialisation ──────────────────────────────────────────────────────
 
   Future<void> initialize() async {
     try {
       // TFLite anti-spoof model (optional)
-      if (_config.enableTFLite && _config.tfliteModelPath != null) {
-        _tflite = TFLiteService(
-          modelPath: _config.tfliteModelPath!,
-          inputSize: _config.tfliteInputSize,
-        );
-        await _tflite!.load();
+      if (_config.enableTFLite) {
+        try {
+          String? modelPath = _config.tfliteModelPath;
+
+          // Auto-download when a URL is provided and no local path is set
+          if (modelPath == null && _config.tfliteModelUrl != null) {
+            final downloader = TFLiteModelDownloader(
+              modelUrl: _config.tfliteModelUrl!,
+              onProgress: (p) {
+                _tfliteModelDownloadProgress = p;
+                notifyListeners();
+              },
+            );
+            modelPath = await downloader.ensureModel();
+            _tfliteModelDownloadProgress = null;
+            notifyListeners();
+          }
+
+          if (modelPath != null) {
+            _tflite = TFLiteService(
+              modelPath: modelPath,
+              inputSize: _config.tfliteInputSize,
+            );
+            final loaded = await _tflite!.load();
+            if (!loaded) {
+              // Corrupted or wrong model — wipe the cache so next launch re-downloads
+              if (_config.tfliteModelUrl != null && !modelPath.startsWith('assets/')) {
+                await TFLiteModelDownloader.clearCache();
+                debugPrint('[LivenessController] Corrupted TFLite cache cleared — will re-download next launch');
+              }
+              _tfliteWarning = 'TFLite model failed to load (cache cleared — restart to re-download)';
+              _tflite = null;
+            }
+          }
+        } catch (e) {
+          debugPrint('[LivenessController] TFLite unavailable this session: $e');
+          _tfliteWarning = 'TFLite unavailable: $e';
+          _tflite = null;
+          _tfliteModelDownloadProgress = null;
+        }
       }
 
-      // FaceNet face identity — auto-downloads model on first run (optional)
+      // FaceNet face identity — auto-downloads model on first run (optional).
+      // Failure is isolated: a bad download or corrupted cache disables Face ID
+      // for this session but does not block camera or liveness from starting.
       if (_config.enableFaceId) {
-        _faceIdentity = FaceIdentityService(
-          similarityThreshold: _config.faceIdSimilarityThreshold,
-        );
-        await _faceIdentity!.initialize(
-          onModelDownloadProgress: (p) {
-            _faceIdModelDownloadProgress = p;
-            notifyListeners();
-          },
-        );
-        _faceIdModelDownloadProgress = null;
-        notifyListeners();
+        try {
+          _faceIdentity = FaceIdentityService(
+            similarityThreshold: _config.faceIdSimilarityThreshold,
+          );
+          await _faceIdentity!.initialize(
+            onModelDownloadProgress: (p) {
+              _faceIdModelDownloadProgress = p;
+              notifyListeners();
+            },
+          );
+          _faceIdModelDownloadProgress = null;
+          notifyListeners();
+        } catch (e) {
+          debugPrint('[LivenessController] FaceId unavailable this session: $e');
+          _faceIdentity = null;
+          _faceIdModelDownloadProgress = null;
+        }
       }
 
       _engine = LivenessEngine(
@@ -154,29 +209,53 @@ class LivenessController extends ChangeNotifier {
     // Fire TFLite anti-spoof inference async; result is stored in _lastTfliteScore
     // and attached to LivenessResult at session end. Guard with _isTfliteRunning
     // so frames don't queue up if inference is slower than the camera rate.
-    final rawForTflite  = result.rawFrame;
+    final rawForTflite  = result.rawFrame ?? _lastRawFrame;
     final faceForTflite = _currentFace;
-    if (_tflite != null && rawForTflite != null && faceForTflite != null && !_isTfliteRunning) {
-      _isTfliteRunning = true;
-      unawaited(_tflite!.run(
-        imageBytes:        rawForTflite.imageBytes,
-        imageWidth:        rawForTflite.imageWidth,
-        imageHeight:       rawForTflite.imageHeight,
-        faceBoundingBox:   faceForTflite.boundingBox,
-        sensorOrientation: rawForTflite.sensorOrientation,
-      ).then((tfliteResult) {
-        if (_isDisposed) return;
-        _isTfliteRunning = false;
-        if (tfliteResult != null) _lastTfliteScore = tfliteResult.realScore;
-      }));
+    if (_tflite != null && !_isTfliteRunning) {
+      if (rawForTflite == null) {
+        debugPrint('[LivenessController] TFLite skip — rawFrame null');
+      } else if (faceForTflite == null) {
+        debugPrint('[LivenessController] TFLite skip — no face detected');
+      } else {
+        _isTfliteRunning = true;
+        _tfliteFuture = _tflite!.run(
+          imageBytes:        rawForTflite.imageBytes,
+          imageWidth:        rawForTflite.imageWidth,
+          imageHeight:       rawForTflite.imageHeight,
+          faceBoundingBox:   faceForTflite.boundingBox,
+          sensorOrientation: rawForTflite.sensorOrientation,
+        ).then((tfliteResult) {
+          if (_isDisposed) return;
+          _isTfliteRunning = false;
+          if (tfliteResult != null) {
+            _lastTfliteScore = tfliteResult.realScore;
+            if (_tfliteWarning != null) {
+              _tfliteWarning = null;  // clear stale warning once inference succeeds
+              notifyListeners();
+            }
+          } else {
+            _tfliteWarning = 'TFLite inference failed — see console for [TFLiteService] error';
+            notifyListeners();
+          }
+          _tfliteFuture = null;
+        });
+        unawaited(_tfliteFuture!);
+      }
     }
 
-    _engine.processFrame(result.faces, quality: result.quality);
+    _engine?.processFrame(result.faces, quality: result.quality);
     notifyListeners();
   }
 
   Future<void> _onEngineComplete(LivenessResult result) async {
     var finalResult = result;
+
+    // If a TFLite inference is still running, wait for it before reading the score.
+    // Without this await the score is always null (race condition: session completes
+    // on the same frame that fired the last unawaited inference).
+    if (_isTfliteRunning && _tfliteFuture != null) {
+      await _tfliteFuture;
+    }
 
     // Attach the most recent TFLite anti-spoof score to the result
     if (_lastTfliteScore != null) {
@@ -212,12 +291,14 @@ class LivenessController extends ChangeNotifier {
 
   Future<void> reset() async {
     if (!_isInitialized) return;
-    _engine.reset(_actions);
-    _currentFace      = null;
-    _lastQuality      = null;
-    _lastRawFrame     = null;
-    _lastTfliteScore  = null;
-    _isTfliteRunning  = false;
+    _engine?.reset(_actions);
+    _currentFace                 = null;
+    _lastQuality                 = null;
+    _lastRawFrame                = null;
+    _lastTfliteScore             = null;
+    _isTfliteRunning             = false;
+    _tfliteFuture                = null;
+    _tfliteModelDownloadProgress = null;
     notifyListeners();
   }
 
@@ -233,7 +314,7 @@ class LivenessController extends ChangeNotifier {
     await _faceDetector.dispose();
     _tflite?.dispose();
     _faceIdentity?.dispose();
-    _engine.dispose();
+    _engine?.dispose();
     super.dispose();
   }
 }
