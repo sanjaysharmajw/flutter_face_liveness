@@ -22,6 +22,14 @@ class VideoReplayModelDownloader {
   /// so index 1 is the real-face score.
   static const int bundledRealClassIndex = 1;
 
+  /// Crop scale for MiniFASNet: 2.7× the face bounding-box size.
+  /// A larger crop is required so the model can see screen-reflection and
+  /// moiré artefacts that indicate a replay attack.
+  static const double bundledCropScale = 2.7;
+
+  /// MiniFASNet was trained with BGR channels and ImageNet normalization.
+  static const bool bundledUseImageNetBgr = true;
+
   final String modelUrl;
   final String? fallbackUrl;
   final void Function(double progress)? onProgress;

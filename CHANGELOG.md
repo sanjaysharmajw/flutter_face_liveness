@@ -1,3 +1,30 @@
+## 3.1.0
+
+### New Features
+
+- **8-signal on-device replay detection** — five new pure-Dart pixel-level signals run every frame alongside MiniFASNet. Final score = **minimum** of all available signals, so an attacker must simultaneously defeat every layer:
+
+  | Signal | File | What it catches |
+  |--------|------|----------------|
+  | S5 – ReplayAnalyzer | `analysis/replay_analyzer.dart` | Looped video (perceptual fingerprint), stabilised video (angular micro-jitter), periodic replay (motion entropy), frozen replay (blink consistency) |
+  | S6 – ScreenArtifactDetector | `analysis/screen_artifact_detector.dart` | LCD/OLED glare (specular highlight density), screen backlight (skin chromatic warmth, iOS only), steady backlight (temporal luma stability) |
+  | S7 – OpticalFlowAnalyzer | `analysis/optical_flow_analyzer.dart` | Static photo (stasis — all blocks near-zero MAD), rigid-body replay (low spatial variance of block motion energies) |
+  | S8 – FaceGeometryAnalyzer | `analysis/face_geometry_analyzer.dart` | Flat surface (3-D depth via cos(yaw) Pearson correlation, eye-ratio consistency), no motion (nose landmark velocity), suspicious asymmetry (eye-open symmetry) |
+
+- **Face landmarks** — `FaceDetectorOptions.enableLandmarks: true` now active. `FaceData` exposes 10 `LandmarkPoint? ({double x, double y})` fields: `leftEyePosition`, `rightEyePosition`, `noseBasePosition`, `leftCheekPosition`, `rightCheekPosition`, `leftMouthPosition`, `rightMouthPosition`, `bottomMouthPosition`, `leftEarPosition`, `rightEarPosition`.
+
+- **New `LivenessController` score getters** — `liveReplayScore`, `liveScreenScore`, `liveFlowScore`, `liveGeoScore` expose rolling per-signal scores for custom overlays.
+
+### Improvements
+
+- **`openMouth` detection faster and more reliable** — replaced single-frame bbox delta (required 8% jump in one frame — too strict) with a 6-frame rolling median baseline comparison at 5% threshold, held for 2 frames. Added `smilingProbability > 0.65` as a secondary OR-signal (ML Kit raises this when teeth are visible). Net result: detection fires in ~2 frames (~100 ms at 20 fps).
+
+- **MiniFASNet preprocessing corrected** — `NormalisedMiniFAS` wrapper expects input `[−1, 1]`; the previous wrapper-compensation formula produced `[−4.6, +4.3]` which collapsed outputs to a degenerate ~0.94 for all inputs. Changed to simple BGR `p / 127.5 − 1.0`.
+
+- **Debug overlay extended** — `showDebugOverlay: true` now shows all 8 signals: `VR-B`, `LAP`, `HET`, `TF`, `RA`, `SCR`, `FLOW`, `GEO` with inline `⚠`/`ok` indicators.
+
+---
+
 ## 3.0.0
 
 ### New Features

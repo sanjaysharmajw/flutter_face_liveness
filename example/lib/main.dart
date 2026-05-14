@@ -372,7 +372,7 @@ class LivenessScreen extends StatelessWidget {
         enableFaceId: enableFaceId,
         enableTFLite: enableTFLite,
         enableVideoReplayDetection: enableVideoReplay,
-        showDebugOverlay: false,
+        showDebugOverlay: true,
       ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
         _fade(ResultScreen(result: result, success: true)),
@@ -471,7 +471,7 @@ class _ResultScreenState extends State<ResultScreen>
                               height: 1.6,
                             ),
                           ),
-                          if (widget.success && widget.result != null) ...[
+                          if (widget.result != null) ...[
                             const SizedBox(height: 28),
                             _StatsCard(result: widget.result!),
                           ],

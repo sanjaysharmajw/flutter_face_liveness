@@ -55,7 +55,7 @@ class FaceDetectorService {
       options: FaceDetectorOptions(
         enableClassification: true,
         enableTracking: true,
-        enableLandmarks: false,
+        enableLandmarks: true,  // needed for eye/nose positions in FaceGeometryAnalyzer
         enableContours: false,
         minFaceSize: 0.15,
         performanceMode: FaceDetectorMode.fast,

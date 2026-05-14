@@ -186,19 +186,46 @@ class LivenessEngine extends ChangeNotifier {
 
   // ── Mouth open detection ────────────────────────────────────────────────
   // ML Kit doesn't expose lip landmarks in basic mode.
-  // We approximate via bounding-box height growth and low smile probability.
-  double _prevFaceHeight = 0;
-  static const double _mouthOpenRatio = 1.08;
+  // Two independent signals in OR combination:
+  //   S1 – Face bbox height growth vs. a stable rolling baseline (jaw drops
+  //        when mouth opens, extending the bounding box downward).
+  //   S2 – smilingProbability: ML Kit fires this when teeth become visible,
+  //        which is exactly what happens when the user opens wide ("aah").
+  // Both signals only need 2 consecutive frames above threshold → fast trigger.
+  final List<double> _mouthBaseline = [];
+  int _mouthOpenConsecutive = 0;
+  static const double _mouthOpenRatio    = 1.05; // 5% above resting baseline
+  static const int    _mouthOpenRequired = 2;    // consecutive frames
 
   bool _detectMouthOpen(FaceData face) {
     final h = face.boundingBox.height;
-    if (_prevFaceHeight == 0) {
-      _prevFaceHeight = h;
+
+    // Build a 6-frame baseline before evaluating.
+    if (_mouthBaseline.length < 6) {
+      _mouthBaseline.add(h);
       return false;
     }
-    final grown = h / _prevFaceHeight;
-    _prevFaceHeight = h;
-    return grown > _mouthOpenRatio && face.smilingProbability < 0.3;
+
+    // Median of baseline — robust to outliers from head-bob frames.
+    final sorted = List<double>.from(_mouthBaseline)..sort();
+    final baseline = sorted[sorted.length ~/ 2];
+
+    // S1: bbox height grew ≥5% above resting baseline.
+    final heightGrown = (h / baseline) > _mouthOpenRatio;
+
+    // S2: ML Kit's smilingProbability rises when teeth are visible.
+    final teethVisible = face.smilingProbability > 0.65;
+
+    if (heightGrown || teethVisible) {
+      _mouthOpenConsecutive++;
+    } else {
+      _mouthOpenConsecutive = 0;
+      // Refresh baseline only while mouth is confirmed closed.
+      _mouthBaseline.removeAt(0);
+      _mouthBaseline.add(h);
+    }
+
+    return _mouthOpenConsecutive >= _mouthOpenRequired;
   }
 
   // ── Completion ──────────────────────────────────────────────────────────
@@ -261,7 +288,8 @@ class LivenessEngine extends ChangeNotifier {
     _consecutiveNoFaceFrames   = 0;
     _consecutiveBadLightFrames = 0;
     _lastConfidenceScore = 0.0;
-    _prevFaceHeight = 0;
+    _mouthBaseline.clear();
+    _mouthOpenConsecutive = 0;
     _humanValidator.reset();
     _blinkDetector.reset();
     _headDetector.reset();

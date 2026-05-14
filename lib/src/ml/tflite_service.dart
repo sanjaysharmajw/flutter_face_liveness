@@ -35,13 +35,23 @@ class TFLiteResult {
 // ══════════════════════════════════════════════════════════════════════════════
 
 class _InitMsg {
-  const _InitMsg(this.modelBytes, this.inputSize, this.replyPort, {this.realClassIndex = 0});
+  const _InitMsg(this.modelBytes, this.inputSize, this.replyPort, {
+    this.realClassIndex = 0,
+    this.cropScale = 1.4,
+    this.useImageNetBgr = false,
+  });
   final Uint8List modelBytes;
   final int inputSize;
   final SendPort replyPort;
   // Index in the output tensor that holds the "real" class score.
   // 0 = bundled FaceAntiSpoofing model, 1 = MiniFASNet format [spoof, real].
   final int realClassIndex;
+  // Scale factor for the square crop around the face centre.
+  // 1.4 = default (20% padding each side). 2.7 = MiniFASNet required scale.
+  final double cropScale;
+  // When true: output BGR channels with ImageNet normalization (MiniFASNet).
+  // When false: output RGB channels with [-1, 1] normalization (default).
+  final bool useImageNetBgr;
 }
 
 class _RunMsg {
@@ -114,10 +124,10 @@ void _tfliteWorker(_InitMsg init) {
       final input = msg.isIOS
           ? _bgraFloat32(bytes, msg.imageWidth, msg.imageHeight,
               msg.bboxLeft, msg.bboxTop, msg.bboxRight, msg.bboxBottom,
-              init.inputSize)
+              init.inputSize, init.cropScale, init.useImageNetBgr)
           : _nv21Float32(bytes, msg.imageWidth, msg.imageHeight,
               msg.bboxLeft, msg.bboxTop, msg.bboxRight, msg.bboxBottom,
-              msg.sensorOrientation, init.inputSize);
+              msg.sensorOrientation, init.inputSize, init.cropScale, init.useImageNetBgr);
 
       interp!.getInputTensor(0).data = input.buffer.asUint8List();
       interp.invoke();
@@ -139,17 +149,33 @@ void _tfliteWorker(_InitMsg init) {
 
 // ── Preprocessing (top-level, isolate-safe — no dart:ui) ─────────────────────
 
+// No pre-computed normalization constants needed here.
+// When useImageNetBgr=true the model receives BGR channels in the simple [-1,1]
+// range, which is the expected input for MiniFASNet's NormalisedMiniFAS wrapper
+// (the wrapper itself applies the (x+1)/2 and ImageNet mean/std operations).
+
+/// Compute a centred square crop.
+/// Returns [x0, y0, cropW, cropH].
+List<int> _squareCrop(
+    double bL, double bT, double bR, double bB,
+    double cropScale, int imgW, int imgH) {
+  final cx = (bL + bR) * 0.5;
+  final cy = (bT + bB) * 0.5;
+  final half = math.max(bR - bL, bB - bT) * cropScale * 0.5;
+  final x0 = (cx - half).clamp(0.0, (imgW - 1).toDouble()).toInt();
+  final y0 = (cy - half).clamp(0.0, (imgH - 1).toDouble()).toInt();
+  final x1 = (cx + half).clamp(0.0, imgW.toDouble()).toInt();
+  final y1 = (cy + half).clamp(0.0, imgH.toDouble()).toInt();
+  return [x0, y0, (x1 - x0).clamp(1, imgW - x0), (y1 - y0).clamp(1, imgH - y0)];
+}
+
 Float32List _bgraFloat32(
   Uint8List bytes, int w, int h,
   double bL, double bT, double bR, double bB,
-  int sz,
+  int sz, double cropScale, bool useImageNetBgr,
 ) {
-  final px = (bR - bL) * 0.20;
-  final py = (bB - bT) * 0.20;
-  final x0 = math.max(0.0, bL - px).toInt().clamp(0, w - 1);
-  final y0 = math.max(0.0, bT - py).toInt().clamp(0, h - 1);
-  final cw = (math.min(w.toDouble(), bR + px).toInt() - x0).clamp(1, w - x0);
-  final ch = (math.min(h.toDouble(), bB + py).toInt() - y0).clamp(1, h - y0);
+  final c = _squareCrop(bL, bT, bR, bB, cropScale, w, h);
+  final x0 = c[0], y0 = c[1], cw = c[2], ch = c[3];
   final out = Float32List(sz * sz * 3);
   int i = 0;
   for (int dy = 0; dy < sz; dy++) {
@@ -157,9 +183,18 @@ Float32List _bgraFloat32(
       final sx = (x0 + dx * cw ~/ sz).clamp(0, w - 1);
       final sy = (y0 + dy * ch ~/ sz).clamp(0, h - 1);
       final p = (sy * w + sx) * 4;
-      out[i++] = bytes[p + 2] / 127.5 - 1.0; // R (BGRA→RGB), normalised to [-1, 1]
-      out[i++] = bytes[p + 1] / 127.5 - 1.0; // G
-      out[i++] = bytes[p    ] / 127.5 - 1.0; // B
+      // BGRA layout: bytes[p]=B, [p+1]=G, [p+2]=R
+      if (useImageNetBgr) {
+        // BGR channel order, simple [-1,1] — NormalisedMiniFAS wrapper input.
+        // The wrapper applies (x+1)/2 then ImageNet mean/std internally.
+        out[i++] = bytes[p    ] / 127.5 - 1.0; // B → [-1, 1]
+        out[i++] = bytes[p + 1] / 127.5 - 1.0; // G → [-1, 1]
+        out[i++] = bytes[p + 2] / 127.5 - 1.0; // R → [-1, 1]
+      } else {
+        out[i++] = bytes[p + 2] / 127.5 - 1.0; // R → [-1, 1]
+        out[i++] = bytes[p + 1] / 127.5 - 1.0; // G
+        out[i++] = bytes[p    ] / 127.5 - 1.0; // B
+      }
     }
   }
   return out;
@@ -168,7 +203,7 @@ Float32List _bgraFloat32(
 Float32List _nv21Float32(
   Uint8List nv21, int origW, int origH,
   double bL, double bT, double bR, double bB,
-  int sensorOri, int sz,
+  int sensorOri, int sz, double cropScale, bool useImageNetBgr,
 ) {
   // Reverse the rotation ML Kit applied → raw NV21 coordinate space
   late double nl, nt, nr, nb;
@@ -183,12 +218,8 @@ Float32List _nv21Float32(
     default:
       nl = bL; nt = bT; nr = bR; nb = bB;
   }
-  final px = (nr - nl) * 0.20;
-  final py = (nb - nt) * 0.20;
-  final x0 = math.max(0.0, nl - px).toInt().clamp(0, origW - 1);
-  final y0 = math.max(0.0, nt - py).toInt().clamp(0, origH - 1);
-  final cw = (math.min(origW.toDouble(), nr + px).toInt() - x0).clamp(1, origW - x0);
-  final ch = (math.min(origH.toDouble(), nb + py).toInt() - y0).clamp(1, origH - y0);
+  final c = _squareCrop(nl, nt, nr, nb, cropScale, origW, origH);
+  final x0 = c[0], y0 = c[1], cw = c[2], ch = c[3];
   final out = Float32List(sz * sz * 3);
   int i = 0;
   for (int dy = 0; dy < sz; dy++) {
@@ -202,9 +233,16 @@ Float32List _nv21Float32(
       final r = (yVal + 1.402   * (vVal - 128)).round().clamp(0, 255);
       final g = (yVal - 0.34414 * (uVal - 128) - 0.71414 * (vVal - 128)).round().clamp(0, 255);
       final b = (yVal + 1.772   * (uVal - 128)).round().clamp(0, 255);
-      out[i++] = r / 127.5 - 1.0; // normalised to [-1, 1]
-      out[i++] = g / 127.5 - 1.0;
-      out[i++] = b / 127.5 - 1.0;
+      if (useImageNetBgr) {
+        // BGR channel order, simple [-1,1] — NormalisedMiniFAS wrapper input.
+        out[i++] = b / 127.5 - 1.0; // B → [-1, 1]
+        out[i++] = g / 127.5 - 1.0; // G → [-1, 1]
+        out[i++] = r / 127.5 - 1.0; // R → [-1, 1]
+      } else {
+        out[i++] = r / 127.5 - 1.0; // normalised to [-1, 1]
+        out[i++] = g / 127.5 - 1.0;
+        out[i++] = b / 127.5 - 1.0;
+      }
     }
   }
   return out;
@@ -249,6 +287,8 @@ class TFLiteService {
     required this.modelPath,
     required this.inputSize,
     this.realClassIndex = 0,
+    this.cropScale = 1.4,
+    this.useImageNetBgr = false,
   });
 
   final String modelPath;
@@ -257,6 +297,12 @@ class TFLiteService {
   /// 0 = bundled FaceAntiSpoofing model (out[0]=real).
   /// 1 = MiniFASNet format (out[0]=spoof, out[1]=real).
   final int realClassIndex;
+  /// Scale factor for the square crop around the face centre.
+  /// 1.4 = default. 2.7 = MiniFASNet required scale for screen-artifact detection.
+  final double cropScale;
+  /// When true: BGR channels + ImageNet normalization (MiniFASNet).
+  /// When false: RGB channels + [-1, 1] normalization (default).
+  final bool useImageNetBgr;
 
   bool         _isLoaded   = false;
   Isolate?     _isolate;
@@ -305,7 +351,9 @@ class TFLiteService {
       _isolate = await Isolate.spawn(
         _tfliteWorker,
         _InitMsg(modelBytes, inputSize, _mainPort!.sendPort,
-            realClassIndex: realClassIndex),
+            realClassIndex: realClassIndex,
+            cropScale: cropScale,
+            useImageNetBgr: useImageNetBgr),
       );
 
       final ready = await readyCompleter.future.timeout(

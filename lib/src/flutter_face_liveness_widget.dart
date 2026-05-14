@@ -342,7 +342,50 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
   Widget _debugOverlay(LivenessController ctrl) {
     final face    = ctrl.currentFace;
     final quality = ctrl.lastQuality;
-    if (face == null) return const SizedBox.shrink();
+    final vr      = ctrl.liveHeuristicScore;
+    final lap     = ctrl.liveLaplacianScore;
+    final het     = ctrl.liveHetScore;
+    final tf      = ctrl.lastTfliteScore;
+    final ra      = ctrl.liveReplayScore;
+    final scr     = ctrl.liveScreenScore;
+    final flow    = ctrl.liveFlowScore;
+    final geo     = ctrl.liveGeoScore;
+
+    final vrLine = vr != null
+        ? 'VR-B:  ${(vr * 100).toStringAsFixed(1)}%${vr < 0.5 ? " ⚠" : " ok"}\n'
+        : '';
+    final lapLine = lap != null
+        ? 'LAP:   ${lap.toStringAsFixed(0)}${lap < 200 ? " ⚠LOW" : " ok"}\n'
+        : '';
+    final hetLine = het != null
+        ? 'HET:   ${het.toStringAsFixed(4)}${het < 0.01 ? " ⚠SCREEN" : " ok"}\n'
+        : '';
+    final tfLine = tf != null
+        ? 'TF:    ${(tf * 100).toStringAsFixed(1)}% real\n'
+        : '';
+    final raLine = ra != null
+        ? 'RA:    ${(ra * 100).toStringAsFixed(1)}%${ra < 0.5 ? " ⚠" : " ok"}\n'
+        : '';
+    final scrLine = scr != null
+        ? 'SCR:   ${(scr * 100).toStringAsFixed(1)}%${scr < 0.5 ? " ⚠SCREEN" : " ok"}\n'
+        : '';
+    final flowLine = flow != null
+        ? 'FLOW:  ${(flow * 100).toStringAsFixed(1)}%${flow < 0.4 ? " ⚠STATIC" : " ok"}\n'
+        : '';
+    final geoLine = geo != null
+        ? 'GEO:   ${(geo * 100).toStringAsFixed(1)}%${geo < 0.4 ? " ⚠FLAT" : " ok"}\n'
+        : '';
+
+    final faceLines = face == null ? 'No face\n' :
+        'Yaw:   ${face.headEulerAngleY.toStringAsFixed(1)}°\n'
+        'Pitch: ${face.headEulerAngleX.toStringAsFixed(1)}°\n'
+        'L-Eye: ${face.leftEyeOpenProbability.toStringAsFixed(2)}\n'
+        'R-Eye: ${face.rightEyeOpenProbability.toStringAsFixed(2)}\n'
+        'Smile: ${face.smilingProbability.toStringAsFixed(2)}\n'
+        'Area:  ${(face.faceAreaRatio * 100).toStringAsFixed(1)}%\n';
+
+    final qualityLine = 'Light: ${quality?.brightness.toStringAsFixed(2) ?? '--'}\n'
+        'Blur:  ${quality?.blurScore.toStringAsFixed(0) ?? '--'}';
 
     return Positioned(
       top: MediaQuery.of(context).padding.top + 100,
@@ -354,14 +397,7 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
-          'Yaw:   ${face.headEulerAngleY.toStringAsFixed(1)}°\n'
-          'Pitch: ${face.headEulerAngleX.toStringAsFixed(1)}°\n'
-          'L-Eye: ${face.leftEyeOpenProbability.toStringAsFixed(2)}\n'
-          'R-Eye: ${face.rightEyeOpenProbability.toStringAsFixed(2)}\n'
-          'Smile: ${face.smilingProbability.toStringAsFixed(2)}\n'
-          'Area:  ${(face.faceAreaRatio * 100).toStringAsFixed(1)}%\n'
-          'Light: ${quality?.brightness.toStringAsFixed(2) ?? '--'}\n'
-          'Blur:  ${quality?.blurScore.toStringAsFixed(0) ?? '--'}',
+          '$vrLine$lapLine$hetLine$tfLine$raLine$scrLine$flowLine$geoLine$faceLines$qualityLine',
           style: const TextStyle(
               color: Colors.white, fontSize: 10, fontFamily: 'monospace'),
         ),
