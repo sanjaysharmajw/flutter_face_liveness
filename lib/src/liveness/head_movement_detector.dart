@@ -14,12 +14,17 @@ import '../models/liveness_action.dart';
 ///   1. The angle exceeds the peak threshold for at least [_holdDurationMs].
 ///   2. The head returns back inside the neutral zone.
 class HeadMovementDetector {
-  static const double _yawThreshold   = 15.0; // degrees to trigger peak
-  static const double _pitchThreshold = 15.0;
-  static const double _neutralYaw     = 6.0;  // must return this close to center
+  // Lowered from 15° → 12°: cheap Android devices under-report yaw/pitch via
+  // ML Kit even when the user clearly turns; 12° still prevents accidental fire.
+  static const double _yawThreshold   = 12.0;
+  static const double _pitchThreshold = 12.0;
+  static const double _neutralYaw     = 6.0;
   static const double _neutralPitch   = 6.0;
-  static const int    _holdDurationMs = 80;   // ms to hold the pose
-  static const int    _debounceMs     = 800;  // ms between consecutive actions
+  // 50ms is one frame at 20 fps — fast enough for genuine movement, still
+  // blocks single-frame noise from a shaky device.
+  static const int    _holdDurationMs = 50;
+  // 600ms: shorter dead zone between consecutive actions (was 800ms).
+  static const int    _debounceMs     = 600;
 
   _MovementState _yawState   = _MovementState.neutral;
   _MovementState _pitchState = _MovementState.neutral;

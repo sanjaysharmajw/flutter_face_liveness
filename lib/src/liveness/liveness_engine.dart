@@ -14,6 +14,7 @@ import '../security/frame_hasher.dart';
 import '../security/session_manager.dart';
 import 'blink_detector.dart';
 import 'head_movement_detector.dart';
+import '../analysis/accessory_validator.dart';
 
 /// Orchestrates all liveness checks and tracks challenge progress.
 ///
@@ -33,11 +34,12 @@ class LivenessEngine extends ChangeNotifier {
   final LivenessConfig _config;
   final CameraValidator _cameraValidator;
 
-  final HumanValidator _humanValidator = HumanValidator();
-  final BlinkDetector _blinkDetector   = BlinkDetector();
-  final HeadMovementDetector _headDetector = HeadMovementDetector();
-  final FrameHasher _frameHasher  = FrameHasher();
-  final SessionManager _session   = SessionManager();
+  final HumanValidator _humanValidator         = HumanValidator();
+  final BlinkDetector _blinkDetector           = BlinkDetector();
+  final HeadMovementDetector _headDetector     = HeadMovementDetector();
+  final FrameHasher _frameHasher               = FrameHasher();
+  final SessionManager _session                = SessionManager();
+  final AccessoryValidator _accessoryValidator = AccessoryValidator();
 
   List<LivenessAction> _sequence = [];
   final List<LivenessAction> _completed = [];
@@ -137,6 +139,18 @@ class LivenessEngine extends ChangeNotifier {
       return;
     }
 
+    // ── Accessory validation ───────────────────────────────────────────────
+    // Skip sunglasses check during blink action: both eyes are intentionally
+    // closed, which would otherwise trigger a false wearingSunglasses status.
+    if (_config.enableAccessoryValidation) {
+      final duringBlink = currentAction == LivenessAction.blink;
+      final accessoryIssue = _accessoryValidator.check(face, skipSunglasses: duringBlink);
+      if (accessoryIssue != null) {
+        _setStatus(accessoryIssue);
+        return;
+      }
+    }
+
     // ── Anti-spoof ─────────────────────────────────────────────────────────
     if (_config.enableAntiSpoof) {
       final humanResult = _humanValidator.validate(face, quality: quality);
@@ -168,7 +182,9 @@ class LivenessEngine extends ChangeNotifier {
         final moved = _headDetector.process(face);
         detected = moved == action;
       case LivenessAction.smile:
-        detected = face.smilingProbability > 0.80;
+        // Lowered from 0.80 → 0.72: natural smiles rarely reach 0.80 on ML Kit;
+        // 0.72 still requires a clear smile without forcing an exaggerated grin.
+        detected = face.smilingProbability > 0.72;
       case LivenessAction.openMouth:
         detected = _detectMouthOpen(face);
     }
@@ -295,6 +311,7 @@ class LivenessEngine extends ChangeNotifier {
     _headDetector.reset();
     _frameHasher.reset();
     _session.reset();
+    _accessoryValidator.reset();
     _buildActionSequence(actions);
     _setStatus(DetectionStatus.initializing);
   }

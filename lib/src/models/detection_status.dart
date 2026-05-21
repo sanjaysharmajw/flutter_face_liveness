@@ -10,6 +10,8 @@ enum DetectionStatus {
   overExposed,
   blurry,
   fakeDetected,
+  wearingSunglasses,
+  wearingCap,
   ready,
   actionInProgress,
   completed,
@@ -28,8 +30,10 @@ extension DetectionStatusX on DetectionStatus {
       case DetectionStatus.lowLight:        return 'Too dark — move to a well-lit area.';
       case DetectionStatus.overExposed:     return 'Too bright — avoid direct light behind you.';
       case DetectionStatus.blurry:          return 'Camera blurry — hold your device steady.';
-      case DetectionStatus.fakeDetected:    return 'Real face required — do not use a photo or screen.';
-      case DetectionStatus.ready:           return 'Hold still…';
+      case DetectionStatus.fakeDetected:     return 'Real face required — do not use a photo or screen.';
+      case DetectionStatus.wearingSunglasses: return 'Please remove your sunglasses or goggles.';
+      case DetectionStatus.wearingCap:       return 'Please remove your cap or hat.';
+      case DetectionStatus.ready:            return 'Hold still…';
       case DetectionStatus.actionInProgress:return '';
       case DetectionStatus.completed:       return 'Verification complete!';
       case DetectionStatus.failed:          return 'Verification failed. Please try again.';
@@ -47,6 +51,8 @@ extension DetectionStatusX on DetectionStatus {
       case DetectionStatus.overExposed:
       case DetectionStatus.blurry:
       case DetectionStatus.fakeDetected:
+      case DetectionStatus.wearingSunglasses:
+      case DetectionStatus.wearingCap:
       case DetectionStatus.failed:
         return true;
       default:

@@ -73,8 +73,10 @@ class StatusIndicatorWidget extends StatelessWidget {
       case DetectionStatus.lowLight:        return ('LOW LIGHT',     const Color(0xFFF59E0B));
       case DetectionStatus.overExposed:     return ('TOO BRIGHT',    const Color(0xFFF59E0B));
       case DetectionStatus.blurry:          return ('HOLD STILL',    const Color(0xFFF59E0B));
-      case DetectionStatus.fakeDetected:    return ('FAKE DETECTED', const Color(0xFFEF4444));
-      case DetectionStatus.ready:           return ('READY',         const Color(0xFF4F6BF4));
+      case DetectionStatus.fakeDetected:     return ('FAKE DETECTED',   const Color(0xFFEF4444));
+      case DetectionStatus.wearingSunglasses:return ('REMOVE GLASSES', const Color(0xFFF59E0B));
+      case DetectionStatus.wearingCap:       return ('REMOVE CAP',     const Color(0xFFF59E0B));
+      case DetectionStatus.ready:            return ('READY',          const Color(0xFF4F6BF4));
       case DetectionStatus.actionInProgress:return ('DETECTING',     const Color(0xFF4F6BF4));
       case DetectionStatus.completed:       return ('VERIFIED',      const Color(0xFF10B981));
       case DetectionStatus.failed:          return ('FAILED',        const Color(0xFFEF4444));

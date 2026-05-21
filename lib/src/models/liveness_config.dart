@@ -48,6 +48,9 @@ class LivenessConfig {
     this.enableDuplicateFrameDetection = true,
     this.duplicateFrameWindowSize = 8,
 
+    // ── Accessory Validation ─────────────────────────────────────────────
+    this.enableAccessoryValidation = false,
+
     // ── Face Identity ────────────────────────────────────────────────────
     this.enableFaceId = false,
     this.faceIdSimilarityThreshold = 0.65,
@@ -149,6 +152,11 @@ class LivenessConfig {
   /// Number of recent frame hashes kept for duplicate comparison.
   final int duplicateFrameWindowSize;
 
+  // ── Accessory Validation ──────────────────────────────────────────────────
+  /// When true, blocks verification if the user is wearing sunglasses, goggles,
+  /// or a cap/hat, and shows a suggestion message to remove them.
+  final bool enableAccessoryValidation;
+
   // ── Face Identity ─────────────────────────────────────────────────────────
   /// Enable MobileFaceNet-based persistent face identity.
   ///
@@ -202,6 +210,7 @@ class LivenessConfig {
     double? faceTooCloseRatio,
     bool? enableDuplicateFrameDetection,
     int? duplicateFrameWindowSize,
+    bool? enableAccessoryValidation,
     bool? enableFaceId,
     double? faceIdSimilarityThreshold,
     ThemeMode? themeMode,
@@ -235,6 +244,7 @@ class LivenessConfig {
           enableDuplicateFrameDetection ?? this.enableDuplicateFrameDetection,
       duplicateFrameWindowSize:
           duplicateFrameWindowSize ?? this.duplicateFrameWindowSize,
+      enableAccessoryValidation: enableAccessoryValidation ?? this.enableAccessoryValidation,
       enableFaceId: enableFaceId ?? this.enableFaceId,
       faceIdSimilarityThreshold: faceIdSimilarityThreshold ?? this.faceIdSimilarityThreshold,
       themeMode: themeMode ?? this.themeMode,

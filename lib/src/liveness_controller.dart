@@ -164,6 +164,7 @@ class LivenessController extends ChangeNotifier {
               },
             );
             modelPath = await downloader.ensureModel();
+            if (_isDisposed) return;
             _tfliteModelDownloadProgress = null;
             notifyListeners();
           }
@@ -208,6 +209,7 @@ class LivenessController extends ChangeNotifier {
               },
             );
             modelPath = await downloader.ensureModel();
+            if (_isDisposed) return;
             _tfliteModelDownloadProgress = null;
             notifyListeners();
           }
@@ -256,6 +258,7 @@ class LivenessController extends ChangeNotifier {
               notifyListeners();
             },
           );
+          if (_isDisposed) return;
           _faceIdModelDownloadProgress = null;
           notifyListeners();
         } catch (e) {
@@ -272,6 +275,8 @@ class LivenessController extends ChangeNotifier {
         onStatusChanged:   (_) => notifyListeners(),
         onAllActionsCompleted: (r) => _onEngineComplete(r),
       );
+
+      if (_isDisposed) return;
 
       final camera = await _cameraService.getFrontCamera();
       if (camera == null) {

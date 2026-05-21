@@ -10,9 +10,11 @@ import '../models/face_data.dart';
 /// (probability > [_openThreshold]) within the last [_wasOpenWindowMs] before
 /// a close event is accepted as a blink.
 class BlinkDetector {
-  // 0.50 — catches fast blinks where ML Kit only dips to 0.45–0.55 at peak
-  static const double _closedThreshold = 0.50;
-  // Eyes must have been above this recently to confirm a genuine blink
+  // 0.60 — fires earlier in the blink motion; helps slow-camera devices that
+  // never report fully closed eyes below 0.50 due to lower sensor quality.
+  static const double _closedThreshold = 0.60;
+  // Must stay above _closedThreshold (hysteresis gap = 0.05) to prevent rapid
+  // false-positive blinks on users whose eye probability oscillates near 0.60.
   static const double _openThreshold   = 0.65;
   // How recently eyes must have been "open" (ms) — blocks droopy-eye false positives
   static const int    _wasOpenWindowMs = 1500;

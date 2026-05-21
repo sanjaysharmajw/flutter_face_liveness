@@ -1,6 +1,6 @@
 # flutter_face_liveness
 
-[![pub version](https://img.shields.io/badge/pub-3.1.0-blue)](https://pub.dev/packages/flutter_face_liveness)
+[![pub version](https://img.shields.io/badge/pub-3.2.0-blue)](https://pub.dev/packages/flutter_face_liveness)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-☕-yellow)](https://buymeacoffee.com/sanjaysharmajw)
@@ -15,6 +15,7 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 
 - [Features](#features)
 - [Replay Attack Detection](#replay-attack-detection)
+- [Accessory Validation](#accessory-validation)
 - [Use Cases](#use-cases)
 - [Getting Started](#getting-started)
 - [Quick Start](#quick-start)
@@ -104,6 +105,59 @@ FLOW:  67.8% ok       ← S7 OpticalFlowAnalyzer
 GEO:   73.5% ok       ← S8 FaceGeometryAnalyzer
 ```
 
+### Tuning for your target devices
+
+Replay detection performance depends on camera sensor quality. For best results:
+
+- **Good lighting** — low-light scenes reduce texture variance (S1) and may lower the score on genuine faces. Move to a well-lit area or lower `videoReplayThreshold` slightly.
+- **Low-end devices** — older camera sensors produce noisier frames. If you see occasional false rejections, adjust `videoReplayThreshold` from `0.50` down to `0.40`–`0.45`.
+- **High-security apps** — raise `videoReplayThreshold` to `0.60`+ and combine with `enableTFLite: true` for maximum protection.
+
+```dart
+// Standard (balanced)
+config: LivenessConfig(
+  enableVideoReplayDetection: true,
+  videoReplayThreshold: 0.50,
+)
+
+// More lenient — older / low-end devices
+config: LivenessConfig(
+  enableVideoReplayDetection: true,
+  videoReplayThreshold: 0.42,
+)
+
+// High-security
+config: LivenessConfig(
+  enableVideoReplayDetection: true,
+  videoReplayThreshold: 0.60,
+  enableTFLite: true,
+)
+```
+
+---
+
+## Accessory Validation
+
+When `enableAccessoryValidation: true`, the SDK blocks verification if the user is wearing **sunglasses / goggles** or a **cap / hat**, and displays a suggestion message until they remove it.
+
+```dart
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft],
+  config: LivenessConfig(
+    enableAccessoryValidation: true,   // enable accessory check
+  ),
+  onSuccess: (result) { ... },
+  onFailed:  (reason) { ... },
+)
+```
+
+| Accessory | Status shown | Detection method |
+|-----------|-------------|-----------------|
+| Sunglasses / goggles | `"Please remove your sunglasses or goggles."` | Both eye-open probabilities < 0.25 for 6+ consecutive frames |
+| Cap / hat | `"Please remove your cap or hat."` | Forehead gap above eyes < 12% of face height for 6+ frames |
+
+> **Note:** Regular (transparent) glasses are not blocked — ML Kit can see through them and they do not affect face embeddings or liveness detection.
+
 ---
 
 ## Use Cases
@@ -181,7 +235,7 @@ FlutterFaceLiveness(
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^3.1.0
+  flutter_face_liveness: ^3.2.0
 ```
 
 ### 2. Platform permissions
@@ -344,6 +398,9 @@ LivenessConfig({
   double faceTooFarRatio   = 0.015,
   double faceTooCloseRatio = 0.70,
 
+  // Accessory Validation
+  bool   enableAccessoryValidation   = false,
+
   // Face Identity
   bool   enableFaceId                = false,
   double faceIdSimilarityThreshold   = 0.65,
@@ -387,6 +444,7 @@ LivenessConfig({
 | `duplicateFrameWindowSize` | `int` | `8` | Sliding window size |
 | `faceTooFarRatio` | `double` | `0.015` | Bbox area ratio below which = too far |
 | `faceTooCloseRatio` | `double` | `0.70` | Bbox area ratio above which = too close |
+| `enableAccessoryValidation` | `bool` | `false` | Block verification if sunglasses/goggles or cap/hat detected |
 | `enableFaceId` | `bool` | `false` | Persistent face identity via FaceNet TFLite |
 | `faceIdSimilarityThreshold` | `double` | `0.65` | Cosine similarity cutoff |
 | `enableTFLite` | `bool` | `false` | FaceAntiSpoofing model (auto-downloads 3.9 MB, cached) |
@@ -408,12 +466,12 @@ LivenessConfig({
 
 | Action | Enum | How it triggers |
 |--------|------|----------------|
-| Blink | `LivenessAction.blink` | Both eye probabilities drop below **0.50** — fires on close, no re-open wait |
-| Turn Left | `LivenessAction.turnLeft` | Yaw > +15° held for ≥ 80 ms |
-| Turn Right | `LivenessAction.turnRight` | Yaw < −15° held for ≥ 80 ms |
-| Look Up | `LivenessAction.lookUp` | Pitch > +15° held for ≥ 80 ms |
-| Look Down | `LivenessAction.lookDown` | Pitch < −15° held for ≥ 80 ms |
-| Smile | `LivenessAction.smile` | Smile probability > 0.80 |
+| Blink | `LivenessAction.blink` | Both eye probabilities drop below **0.60** — fires on close, no re-open wait |
+| Turn Left | `LivenessAction.turnLeft` | Yaw > +12° held for ≥ 50 ms |
+| Turn Right | `LivenessAction.turnRight` | Yaw < −12° held for ≥ 50 ms |
+| Look Up | `LivenessAction.lookUp` | Pitch > +12° held for ≥ 50 ms |
+| Look Down | `LivenessAction.lookDown` | Pitch < −12° held for ≥ 50 ms |
+| Smile | `LivenessAction.smile` | Smile probability > 0.72 |
 | Open Mouth | `LivenessAction.openMouth` | Bbox height > 5% above 6-frame baseline **OR** smile probability > 0.65 (teeth visible), held 2 frames |
 
 ### Recommended combinations
@@ -508,6 +566,8 @@ await controller.initialize();
 | `overExposed` | Too bright (6-frame debounce) |
 | `blurry` | Out of focus |
 | `fakeDetected` | Spoof / duplicate-frame triggered |
+| `wearingSunglasses` | Sunglasses or goggles detected — shown when `enableAccessoryValidation: true` |
+| `wearingCap` | Cap or hat detected — shown when `enableAccessoryValidation: true` |
 | `actionInProgress` | Performing challenge |
 | `completed` | All actions done |
 | `failed` | Timed out or manually failed |
@@ -670,7 +730,7 @@ Four challenge presets: Standard · Extended · Full · With Face ID.
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
-Latest: **v3.1.0** — 8-signal replay detection pipeline, face landmarks, `openMouth` detection fix, MiniFASNet preprocessing fix.
+Latest: **v3.2.0** — Accessory validation, faster action detection, camera initialization race condition fix, replay attack tuning guidance.
 
 ---
 

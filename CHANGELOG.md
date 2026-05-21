@@ -1,3 +1,38 @@
+## 3.2.0
+
+### New Features
+
+- **Accessory Validation** — `LivenessConfig.enableAccessoryValidation` (default `false`). When enabled, verification is blocked if the user is wearing sunglasses/goggles or a cap/hat, with a clear suggestion message shown in the status badge. Detection is purely heuristic — no extra model required:
+  - `wearingSunglasses` — both eye-open probabilities < 0.25 for 6+ consecutive frames
+  - `wearingCap` — forehead gap above eye landmarks < 12% of face bounding-box height for 6+ frames
+  - Two new `DetectionStatus` values: `wearingSunglasses`, `wearingCap`
+  - `StatusIndicatorWidget` updated: amber `"REMOVE GLASSES"` / `"REMOVE CAP"` badges
+  - Blink action guard: sunglasses check is automatically skipped during blink challenge to prevent false positives from intentional eye closure
+
+### Improvements
+
+- **Faster action detection on low-end devices** — detection thresholds recalibrated based on real ML Kit output ranges across device tiers:
+
+  | Action | Old threshold | New threshold | Reason |
+  |--------|--------------|---------------|--------|
+  | Blink (closed) | `0.50` | `0.60` | Slow-camera devices report 0.55–0.60 for closed eyes |
+  | Blink (open guard) | `0.65` | `0.65` | Kept — maintains 0.05 hysteresis gap above closed threshold |
+  | Turn Left / Right | `±15°` | `±12°` | Cheap Android devices cap ML Kit yaw output at ~12–13° |
+  | Look Up / Down | `±15°` | `±12°` | Same sensor limitation |
+  | Hold duration | `80 ms` | `50 ms` | 1 frame at 20 fps is sufficient; 80 ms was 1.6 frames |
+  | Inter-action debounce | `800 ms` | `600 ms` | Reduces dead zone between consecutive actions |
+  | Smile | `> 0.80` | `> 0.72` | Natural smiles rarely reach 0.80 on ML Kit |
+
+### Bug Fixes
+
+- **Camera never starts after model download (race condition)** — `LivenessController.initialize()` ran model downloads as a fire-and-forget coroutine. If the widget was disposed while a download was in progress, `_isDisposed` was set to `true` but `initialize()` continued and opened the camera anyway. `_processFrame()` then silently dropped all frames. Fixed by adding `if (_isDisposed) return` guards after each major `await` in the initialization chain — after each model download, after FaceID model load, and critically before `_cameraService.initialize()`.
+
+- **Blink false positives (hysteresis gap removed)** — `_openThreshold` was mistakenly lowered to equal `_closedThreshold` (both `0.60`), eliminating the hysteresis gap. Users with naturally droopy eyelids (~0.60 probability) would oscillate rapidly between "closed" and "open" states, triggering false blinks. Fixed by keeping `_openThreshold = 0.65`, maintaining a 0.05 gap above `_closedThreshold`.
+
+- **`AccessoryValidator` not reset on session retry** — `LivenessEngine.reset()` did not call `_accessoryValidator.reset()`, causing `_sunglassesCount` and `_capCount` to carry over into a new session after a retry. Fixed by adding `_accessoryValidator.reset()` to `LivenessEngine.reset()`.
+
+---
+
 ## 3.1.0
 
 ### New Features
