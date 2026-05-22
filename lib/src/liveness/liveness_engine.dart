@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/detection_status.dart';
 import '../models/face_data.dart';
+import '../models/face_mesh_data.dart';
 import '../models/frame_quality.dart';
 import '../models/liveness_action.dart';
 import '../models/liveness_config.dart';
@@ -14,7 +15,6 @@ import '../security/frame_hasher.dart';
 import '../security/session_manager.dart';
 import 'blink_detector.dart';
 import 'head_movement_detector.dart';
-import '../analysis/accessory_validator.dart';
 
 /// Orchestrates all liveness checks and tracks challenge progress.
 ///
@@ -37,9 +37,8 @@ class LivenessEngine extends ChangeNotifier {
   final HumanValidator _humanValidator         = HumanValidator();
   final BlinkDetector _blinkDetector           = BlinkDetector();
   final HeadMovementDetector _headDetector     = HeadMovementDetector();
-  final FrameHasher _frameHasher               = FrameHasher();
-  final SessionManager _session                = SessionManager();
-  final AccessoryValidator _accessoryValidator = AccessoryValidator();
+  final FrameHasher _frameHasher   = FrameHasher();
+  final SessionManager _session    = SessionManager();
 
   List<LivenessAction> _sequence = [];
   final List<LivenessAction> _completed = [];
@@ -77,7 +76,7 @@ class LivenessEngine extends ChangeNotifier {
 
   // ── Frame processing ────────────────────────────────────────────────────
 
-  void processFrame(List<FaceData> faces, {FrameQuality? quality}) {
+  void processFrame(List<FaceData> faces, {FrameQuality? quality, FaceMeshData? meshData}) {
     if (_isComplete) return;
     _session.incrementFrame();
 
@@ -139,18 +138,6 @@ class LivenessEngine extends ChangeNotifier {
       return;
     }
 
-    // ── Accessory validation ───────────────────────────────────────────────
-    // Skip sunglasses check during blink action: both eyes are intentionally
-    // closed, which would otherwise trigger a false wearingSunglasses status.
-    if (_config.enableAccessoryValidation) {
-      final duringBlink = currentAction == LivenessAction.blink;
-      final accessoryIssue = _accessoryValidator.check(face, skipSunglasses: duringBlink);
-      if (accessoryIssue != null) {
-        _setStatus(accessoryIssue);
-        return;
-      }
-    }
-
     // ── Anti-spoof ─────────────────────────────────────────────────────────
     if (_config.enableAntiSpoof) {
       final humanResult = _humanValidator.validate(face, quality: quality);
@@ -166,27 +153,29 @@ class LivenessEngine extends ChangeNotifier {
     if (action == null) return;
 
     _setStatus(DetectionStatus.actionInProgress);
-    _processAction(action, face);
+    _processAction(action, face, meshData: meshData);
   }
 
-  void _processAction(LivenessAction action, FaceData face) {
+  void _processAction(LivenessAction action, FaceData face, {FaceMeshData? meshData}) {
     bool detected = false;
 
     switch (action) {
       case LivenessAction.blink:
-        detected = _blinkDetector.process(face);
+        detected = _blinkDetector.process(face, meshData: meshData);
       case LivenessAction.turnLeft:
       case LivenessAction.turnRight:
       case LivenessAction.lookUp:
       case LivenessAction.lookDown:
-        final moved = _headDetector.process(face);
+        final moved = _headDetector.process(face, meshData: meshData);
         detected = moved == action;
       case LivenessAction.smile:
-        // Lowered from 0.80 → 0.72: natural smiles rarely reach 0.80 on ML Kit;
-        // 0.72 still requires a clear smile without forcing an exaggerated grin.
-        detected = face.smilingProbability > 0.72;
+        // Face Mesh: lip corner lift > 0.014 of face height = genuine smile.
+        // Fallback: ML Kit smilingProbability.
+        detected = meshData != null
+            ? meshData.smileRatio > 0.014
+            : face.smilingProbability > 0.65;
       case LivenessAction.openMouth:
-        detected = _detectMouthOpen(face);
+        detected = _detectMouthOpen(face, meshData: meshData);
     }
 
     if (detected) {
@@ -201,23 +190,34 @@ class LivenessEngine extends ChangeNotifier {
   }
 
   // ── Mouth open detection ────────────────────────────────────────────────
-  // ML Kit doesn't expose lip landmarks in basic mode.
-  // Two independent signals in OR combination:
+  // Three independent signals — first available wins:
+  //   S0 – Face Mesh lip gap (landmarks 13/14): direct geometric measure,
+  //        unaffected by a hand in front of the mouth (preferred when mesh
+  //        is available, as bbox and ML Kit signals can be fooled).
   //   S1 – Face bbox height growth vs. a stable rolling baseline (jaw drops
   //        when mouth opens, extending the bounding box downward).
-  //   S2 – smilingProbability: ML Kit fires this when teeth become visible,
-  //        which is exactly what happens when the user opens wide ("aah").
-  // Both signals only need 2 consecutive frames above threshold → fast trigger.
+  //        Upper bound rejects hand/occlusion (>20% bbox growth).
+  //   S2 – smilingProbability: ML Kit fires this when teeth become visible.
+  // Both S1 and S2 signals only need 2 consecutive frames above threshold.
   final List<double> _mouthBaseline = [];
   int _mouthOpenConsecutive = 0;
-  static const double _mouthOpenRatio    = 1.05; // 5% above resting baseline
-  static const int    _mouthOpenRequired = 2;    // consecutive frames
+  static const double _mouthOpenRatio    = 1.05;  // S1: 5% above resting baseline
+  static const double _mouthOpenRatioMax = 1.20;  // S1: >20% = hand/occlusion
+  static const double _meshMouthOpen     = 0.032; // S0: lowered 0.040→0.032: fires on smaller opening
+  static const int    _mouthOpenRequired = 1;     // 1 frame — baseline already filters noise
 
-  bool _detectMouthOpen(FaceData face) {
+  bool _detectMouthOpen(FaceData face, {FaceMeshData? meshData}) {
+    // S0: Face Mesh lip gap — immune to hand occlusion.
+    // Fires immediately — the 3-frame baseline window below is bypassed.
+    if (meshData != null) {
+      return meshData.mouthOpenRatio > _meshMouthOpen;
+    }
+
+    // S1 + S2 fallback when Face Mesh is unavailable.
     final h = face.boundingBox.height;
 
-    // Build a 6-frame baseline before evaluating.
-    if (_mouthBaseline.length < 6) {
+    // Build a 2-frame baseline before evaluating (was 3 — 100 ms vs 150 ms).
+    if (_mouthBaseline.length < 2) {
       _mouthBaseline.add(h);
       return false;
     }
@@ -226,8 +226,9 @@ class LivenessEngine extends ChangeNotifier {
     final sorted = List<double>.from(_mouthBaseline)..sort();
     final baseline = sorted[sorted.length ~/ 2];
 
-    // S1: bbox height grew ≥5% above resting baseline.
-    final heightGrown = (h / baseline) > _mouthOpenRatio;
+    // S1: bbox height grew ≥5% but <20% above baseline.
+    final ratio = h / baseline;
+    final heightGrown = ratio > _mouthOpenRatio && ratio < _mouthOpenRatioMax;
 
     // S2: ML Kit's smilingProbability rises when teeth are visible.
     final teethVisible = face.smilingProbability > 0.65;
@@ -311,7 +312,6 @@ class LivenessEngine extends ChangeNotifier {
     _headDetector.reset();
     _frameHasher.reset();
     _session.reset();
-    _accessoryValidator.reset();
     _buildActionSequence(actions);
     _setStatus(DetectionStatus.initializing);
   }

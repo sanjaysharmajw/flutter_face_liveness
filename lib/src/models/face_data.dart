@@ -125,20 +125,6 @@ class FaceData {
   bool get isFaceTooFar => faceAreaRatio < 0.015;
   bool get isFaceTooClose => faceAreaRatio > 0.70;
 
-  /// Both eyes consistently dark → likely sunglasses or goggles.
-  bool get likelySunglasses =>
-      leftEyeOpenProbability < 0.25 && rightEyeOpenProbability < 0.25;
-
-  /// Very small forehead gap above eyes → likely wearing a cap or hat.
-  /// Ratio = (eyeY - bboxTop) / bboxHeight. If < 0.12, forehead is hidden.
-  bool get likelyCap {
-    final eyeY = leftEyePosition?.y ?? rightEyePosition?.y;
-    if (eyeY == null) return false;
-    final foreheadRatio =
-        (eyeY - boundingBox.top) / boundingBox.height.clamp(1, double.infinity);
-    return foreheadRatio < 0.12;
-  }
-
   @override
   String toString() => 'FaceData(yaw: ${headEulerAngleY.toStringAsFixed(1)}, '
       'pitch: ${headEulerAngleX.toStringAsFixed(1)}, '

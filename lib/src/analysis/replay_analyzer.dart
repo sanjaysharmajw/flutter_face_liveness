@@ -171,8 +171,10 @@ class ReplayAnalyzer {
 
     final overall = (d * 0.35 + j * 0.35 + m * 0.15 + b * 0.15).clamp(0.0, 1.0);
 
-    // Independent hard-fail gates (less restrictive to avoid false positives)
-    final hardFail = (d < 0.15) || (j < 0.10);
+    // Hard-fail only on extreme values — budget devices quantise ML Kit Euler
+    // angles to 0.5° steps, producing near-zero jitter even for real users.
+    // j < 0.03 requires virtually zero angular variation across all frames.
+    final hardFail = (d < 0.10) || (j < 0.03);
 
     final isReplay = overall < threshold || hardFail;
 

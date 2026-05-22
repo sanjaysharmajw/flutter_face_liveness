@@ -1,6 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
+import '../identity/face_identity_service.dart' show FaceIdMode;
+
 /// Full configuration for the liveness verification session.
 ///
 /// Pass to [FlutterFaceLiveness] or [LivenessController] to customise
@@ -48,12 +50,14 @@ class LivenessConfig {
     this.enableDuplicateFrameDetection = true,
     this.duplicateFrameWindowSize = 8,
 
-    // ── Accessory Validation ─────────────────────────────────────────────
-    this.enableAccessoryValidation = false,
+    this.enableFaceMesh = false,
 
     // ── Face Identity ────────────────────────────────────────────────────
     this.enableFaceId = false,
-    this.faceIdSimilarityThreshold = 0.65,
+    this.faceIdMode = FaceIdMode.auto,
+    this.faceIdSimilarityThreshold = 0.82,
+    this.registrationDuplicateThreshold = 0.75,
+    this.minEmbeddingQuality = 0.50,
 
     // ── UI ───────────────────────────────────────────────────────────────
     this.themeMode = ThemeMode.dark,
@@ -99,46 +103,26 @@ class LivenessConfig {
 
   /// Flutter asset key (e.g. `'assets/anti_spoof.tflite'`) or absolute
   /// filesystem path for the .tflite model.
-  ///
-  /// When null and [tfliteModelUrl] is set, the model is auto-downloaded on
-  /// first use and cached permanently — no manual file management needed.
   final String? tfliteModelPath;
 
   /// HTTPS URL to auto-download the TFLite model from on first use.
-  ///
-  /// When null the package automatically uses its bundled anti-spoof model URL —
-  /// simply set [enableTFLite] to true and the model is downloaded and cached
-  /// with no extra configuration. Set this only when using a custom model.
-  ///
-  /// Ignored when [tfliteModelPath] is already set. The downloaded file is
-  /// cached permanently in the app documents directory; subsequent sessions
-  /// load from cache instantly with no network activity.
   final String? tfliteModelUrl;
 
   /// Input image size expected by the TFLite model (square).
-  /// When null the package uses the bundled model's required size (256).
   final int? tfliteInputSize;
 
   /// TFLite real-score below this threshold flags [LivenessResult.deepfakeDetected].
-  /// Range 0.0–1.0. Default 0.40 — scores under 40% real confidence = deepfake/spoof.
   final double tfliteDeepfakeThreshold;
 
   // ── Video Replay Detection ────────────────────────────────────────────────
   /// Enable MiniFASNet-based video-replay attack detection (second TFLite model).
   final bool enableVideoReplayDetection;
 
-  /// Local asset path or absolute filesystem path for the video-replay model.
   final String? videoReplayModelPath;
-
-  /// HTTPS URL to auto-download the MiniFASNet video-replay model from.
-  /// When null, the bundled MiniFASNetV2 model URL is used.
   final String? videoReplayModelUrl;
-
-  /// Input size for the video-replay model (square). Default: 80 (MiniFASNet).
   final int? videoReplayInputSize;
 
   /// Real-score below this threshold flags [LivenessResult.videoReplayDetected].
-  /// Default 0.50 — scores under 50% = video replay attack.
   final double videoReplayThreshold;
 
   // ── Face geometry ─────────────────────────────────────────────────────────
@@ -152,25 +136,44 @@ class LivenessConfig {
   /// Number of recent frame hashes kept for duplicate comparison.
   final int duplicateFrameWindowSize;
 
-  // ── Accessory Validation ──────────────────────────────────────────────────
-  /// When true, blocks verification if the user is wearing sunglasses, goggles,
-  /// or a cap/hat, and shows a suggestion message to remove them.
-  final bool enableAccessoryValidation;
+  /// Enable MediaPipe Face Mesh detection (468 3-D landmarks).
+  final bool enableFaceMesh;
 
   // ── Face Identity ─────────────────────────────────────────────────────────
   /// Enable MobileFaceNet-based persistent face identity.
   ///
   /// When `true`, [LivenessResult.faceId] is populated after each successful
-  /// verification. The same physical person always receives the same ID,
-  /// even across separate app sessions.
-  ///
-  /// Requires the bundled model: run `scripts/download_face_model.sh` once
-  /// after adding the package to download the MobileFaceNet weights.
+  /// session. Embeddings are stored encrypted on-device and persist across
+  /// app restarts.
   final bool enableFaceId;
 
-  /// Cosine-similarity threshold (0.0–1.0) for matching an existing face.
-  /// Raise for stricter identity matching; lower to tolerate more variation.
+  /// How the identity service handles new face embeddings.
+  ///
+  /// - [FaceIdMode.auto] (default) — match existing or register new.
+  /// - [FaceIdMode.registrationOnly] — reject if face already registered
+  ///   (sets [LivenessResult.faceAlreadyRegistered] = true); register if new.
+  ///   Use this mode to guarantee one registration per person.
+  /// - [FaceIdMode.verificationOnly] — only match; never register unknown faces.
+  ///   Use for pure login flows where enrolment happens separately.
+  final FaceIdMode faceIdMode;
+
+  /// Cosine-similarity threshold (0.0–1.0) for matching in [FaceIdMode.auto]
+  /// and [FaceIdMode.verificationOnly].
+  /// Default 0.82 — gallery-based best-of-5 matching.
+  /// Raise toward 0.86 for stricter matching; lower toward 0.78 if misses occur.
   final double faceIdSimilarityThreshold;
+
+  /// Similarity at or above which a registration attempt is blocked as a
+  /// duplicate in [FaceIdMode.registrationOnly].
+  /// Default 0.75 — intentionally lower than [faceIdSimilarityThreshold] to
+  /// be conservative: borderline cases are rejected rather than double-registered.
+  final double registrationDuplicateThreshold;
+
+  /// Discard face embeddings with quality score below this value before
+  /// averaging. Range 0.0–1.0. Default 0.50.
+  /// Rejects degenerate embeddings (all-zero, wrong norm, etc.) caused by
+  /// low-light, motion blur, or partial face crops.
+  final double minEmbeddingQuality;
 
   // ── UI ────────────────────────────────────────────────────────────────────
   final ThemeMode themeMode;
@@ -210,9 +213,12 @@ class LivenessConfig {
     double? faceTooCloseRatio,
     bool? enableDuplicateFrameDetection,
     int? duplicateFrameWindowSize,
-    bool? enableAccessoryValidation,
+    bool? enableFaceMesh,
     bool? enableFaceId,
+    FaceIdMode? faceIdMode,
     double? faceIdSimilarityThreshold,
+    double? registrationDuplicateThreshold,
+    double? minEmbeddingQuality,
     ThemeMode? themeMode,
     bool? showDebugOverlay,
   }) {
@@ -242,11 +248,15 @@ class LivenessConfig {
       faceTooCloseRatio: faceTooCloseRatio ?? this.faceTooCloseRatio,
       enableDuplicateFrameDetection:
           enableDuplicateFrameDetection ?? this.enableDuplicateFrameDetection,
-      duplicateFrameWindowSize:
-          duplicateFrameWindowSize ?? this.duplicateFrameWindowSize,
-      enableAccessoryValidation: enableAccessoryValidation ?? this.enableAccessoryValidation,
+      duplicateFrameWindowSize: duplicateFrameWindowSize ?? this.duplicateFrameWindowSize,
+      enableFaceMesh: enableFaceMesh ?? this.enableFaceMesh,
       enableFaceId: enableFaceId ?? this.enableFaceId,
-      faceIdSimilarityThreshold: faceIdSimilarityThreshold ?? this.faceIdSimilarityThreshold,
+      faceIdMode: faceIdMode ?? this.faceIdMode,
+      faceIdSimilarityThreshold:
+          faceIdSimilarityThreshold ?? this.faceIdSimilarityThreshold,
+      registrationDuplicateThreshold:
+          registrationDuplicateThreshold ?? this.registrationDuplicateThreshold,
+      minEmbeddingQuality: minEmbeddingQuality ?? this.minEmbeddingQuality,
       themeMode: themeMode ?? this.themeMode,
       showDebugOverlay: showDebugOverlay ?? this.showDebugOverlay,
     );

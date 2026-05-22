@@ -30,6 +30,7 @@ export 'src/models/liveness_action.dart';
 export 'src/models/liveness_config.dart';
 export 'src/models/liveness_result.dart';
 export 'src/models/face_data.dart';
+export 'src/models/face_mesh_data.dart';
 export 'src/models/detection_status.dart';
 export 'src/models/frame_quality.dart';
 
@@ -40,6 +41,8 @@ export 'src/ml/tflite_model_downloader.dart' show TFLiteModelDownloader, TFLiteM
 export 'src/security/session_manager.dart' show SessionManager;
 
 // Face identity
-export 'src/identity/face_identity_service.dart' show FaceIdentityService;
-export 'src/identity/face_model_downloader.dart'  show FaceModelDownloader, FaceModelDownloadException;
-export 'src/ml/face_detector_service.dart'        show RawFrameData;
+export 'src/identity/face_identity_service.dart'
+    show FaceIdentityService, FaceIdMode, FaceMatchOutcome, FaceMatchResult;
+export 'src/identity/face_model_downloader.dart'
+    show FaceModelDownloader, FaceModelDownloadException;
+export 'src/ml/face_detector_service.dart' show RawFrameData;

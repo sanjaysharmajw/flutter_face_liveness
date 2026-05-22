@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_face_liveness/flutter_face_liveness.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -73,21 +72,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _loadFaceIds() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final json  = prefs.getString('ffl_known_faces_v1');
-      if (json == null || !mounted) return;
-      final Map<String, dynamic> decoded =
-          Map<String, dynamic>.from(await Future.value(
-              (json.isNotEmpty) ? _decodeJson(json) : {}));
-      setState(() => _registeredFaceIds = decoded.keys.toList());
+      final service = FaceIdentityService();
+      await service.initialize();
+      if (!mounted) { service.dispose(); return; }
+      setState(() => _registeredFaceIds = service.registeredFaceIds.toList());
+      service.dispose();
     } catch (_) {}
-  }
-
-  Map<String, dynamic> _decodeJson(String s) {
-    // lightweight JSON key extraction — avoids importing dart:convert
-    final reg = RegExp(r'"(FID-[A-F0-9]+)"');
-    final ids  = reg.allMatches(s).map((m) => m.group(1)!).toList();
-    return {for (final id in ids) id: []};
   }
 
   @override
@@ -188,10 +178,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       const SizedBox(height: 14),
                       _ChallengeCard(
                         icon: Icons.fingerprint_rounded,
-                        title: 'With Face ID',
+                        title: 'Face ID — Auto',
                         subtitle: 'Same face → same ID across sessions',
                         accentColor: _success,
                         onTap: () => _launchWithFaceId(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.person_add_alt_1_rounded,
+                        title: 'Register Face',
+                        subtitle: 'One-time enrolment · Rejects duplicates',
+                        accentColor: _cyan,
+                        onTap: () => _launchRegisterFace(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.how_to_reg_rounded,
+                        title: 'Verify Face',
+                        subtitle: 'Login-only · Never registers unknown faces',
+                        accentColor: _purple,
+                        onTap: () => _launchVerifyFace(context),
                       ),
                       const SizedBox(height: 14),
                       _ChallengeCard(
@@ -211,8 +217,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     child: _FaceIdHistoryCard(
                       faceIds: _registeredFaceIds,
                       onClear: () async {
-                        final prefs = await SharedPreferences.getInstance();
-                        await prefs.remove('ffl_known_faces_v1');
+                        final service = FaceIdentityService();
+                        await service.initialize();
+                        await service.clearAllFaces();
+                        service.dispose();
                         if (mounted) setState(() => _registeredFaceIds = []);
                       },
                     ),
@@ -275,9 +283,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await Navigator.of(ctx).push(_fade(const LivenessScreen(
       actions: [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
+      faceIdMode: FaceIdMode.auto,
     )));
-    // Refresh face ID list after returning from liveness screen
     if (mounted) await _loadFaceIds();
+  }
+
+  Future<void> _launchRegisterFace(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(const LivenessScreen(
+      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.registrationOnly,
+    )));
+    if (mounted) await _loadFaceIds();
+  }
+
+  Future<void> _launchVerifyFace(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(const LivenessScreen(
+      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.verificationOnly,
+    )));
   }
 
   void _showPermissionSheet(BuildContext ctx) {
@@ -352,11 +389,13 @@ class LivenessScreen extends StatelessWidget {
     super.key,
     required this.actions,
     this.enableFaceId = false,
+    this.faceIdMode = FaceIdMode.auto,
     this.enableTFLite = true,
     this.enableVideoReplay = false,
   });
   final List<LivenessAction> actions;
   final bool enableFaceId;
+  final FaceIdMode faceIdMode;
   final bool enableTFLite;
   final bool enableVideoReplay;
 
@@ -368,8 +407,11 @@ class LivenessScreen extends StatelessWidget {
         randomizeActions: true,
         enableAntiSpoof: true,
         enableBrightnessCheck: true,
+        enableDuplicateFrameDetection: true,
+        enableFaceMesh: true,
         enableBlurDetection: true,
         enableFaceId: enableFaceId,
+        faceIdMode: faceIdMode,
         enableTFLite: enableTFLite,
         enableVideoReplayDetection: enableVideoReplay,
         showDebugOverlay: true,
@@ -463,12 +505,19 @@ class _ResultScreenState extends State<ResultScreen>
                           Text(
                             widget.success
                                 ? 'Your liveness has been successfully confirmed'
-                                : (widget.failureReason ?? 'Please try again'),
+                                : (widget.failureReason?.isNotEmpty == true
+                                    ? widget.failureReason!
+                                    : 'Verification could not be completed. Please try again.'),
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: _textSecondary,
-                              fontSize: 13,
+                            style: TextStyle(
+                              color: widget.success
+                                  ? _textSecondary
+                                  : _error,
+                              fontSize: widget.success ? 13 : 14,
                               height: 1.6,
+                              fontWeight: widget.success
+                                  ? FontWeight.normal
+                                  : FontWeight.w600,
                             ),
                           ),
                           if (widget.result != null) ...[
@@ -582,7 +631,7 @@ class _StatsCard extends StatelessWidget {
                   realScore: result.tfliteScore!,
                   accent: result.deepfakeDetected ? _error : _success,
                 )
-              : _StatTile(
+              : const _StatTile(
                   icon: Icons.help_outline_rounded,
                   label: 'Deepfake / Anti-Spoof',
                   value: 'N/A — TFLite not enabled',
@@ -601,7 +650,7 @@ class _StatsCard extends StatelessWidget {
                   realScore: result.videoReplayScore!,
                   accent: result.videoReplayDetected ? _error : _success,
                 )
-              : _StatTile(
+              : const _StatTile(
                   icon: Icons.help_outline_rounded,
                   label: 'Video Replay Detection',
                   value: 'N/A — Video Replay model not enabled',
@@ -610,8 +659,19 @@ class _StatsCard extends StatelessWidget {
           if (result.faceId != null) ...[
             _divider(),
             _FaceIdMatchCard(
-              faceId:   result.faceId!,
-              isNew:    result.isFaceIdNew ?? true,
+              faceId:           result.faceId!,
+              isNew:            result.isFaceIdNew ?? true,
+              alreadyRegistered: result.faceAlreadyRegistered ?? false,
+            ),
+          ],
+          if (result.faceMatchScore != null) ...[
+            _divider(),
+            _ScoreBarTile(
+              icon: Icons.people_alt_outlined,
+              label: 'Face Match Score',
+              status: '${(result.faceMatchScore! * 100).toStringAsFixed(1)}% similarity',
+              realScore: result.faceMatchScore!,
+              accent: _success,
             ),
           ],
           if (result.sessionId != null) ...[
@@ -642,18 +702,37 @@ class _StatsCard extends StatelessWidget {
 }
 
 class _FaceIdMatchCard extends StatelessWidget {
-  const _FaceIdMatchCard({required this.faceId, required this.isNew});
+  const _FaceIdMatchCard({
+    required this.faceId,
+    required this.isNew,
+    this.alreadyRegistered = false,
+  });
   final String faceId;
   final bool   isNew;
+  final bool   alreadyRegistered;
 
   @override
   Widget build(BuildContext context) {
-    final accent = isNew ? _primary : _success;
-    final label  = isNew ? 'New Face Registered' : 'Face Recognised — Welcome Back!';
-    final sub    = isNew
-        ? 'This is your unique Face ID. It will be returned every time you scan the same face.'
-        : 'This face was already stored on this device. The same ID was matched.';
-    final icon   = isNew ? Icons.person_add_alt_1_rounded : Icons.how_to_reg_rounded;
+    final Color accent;
+    final String label;
+    final String sub;
+    final IconData icon;
+    if (alreadyRegistered) {
+      accent = const Color(0xFFF59E0B);
+      label  = 'Face Already Registered';
+      sub    = 'This face is already enrolled. Please use Verify Face to log in.';
+      icon   = Icons.warning_amber_rounded;
+    } else if (isNew) {
+      accent = _primary;
+      label  = 'New Face Registered';
+      sub    = 'Your unique Face ID has been created. It persists across sessions.';
+      icon   = Icons.person_add_alt_1_rounded;
+    } else {
+      accent = _success;
+      label  = 'Face Recognised — Welcome Back!';
+      sub    = 'This face was matched to an existing ID stored on this device.';
+      icon   = Icons.how_to_reg_rounded;
+    }
 
     return GestureDetector(
       onTap: () {

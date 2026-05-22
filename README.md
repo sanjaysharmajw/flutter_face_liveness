@@ -27,6 +27,7 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 - [TFLite Integration](#tflite-integration-optional)
 - [Architecture](#architecture)
 - [Performance](#performance)
+- [Lighting & Brightness](#lighting--brightness)
 - [Security](#security)
 - [Example App](#example-app)
 - [Changelog](#changelog)
@@ -48,6 +49,7 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 | **Face Geometry** | 3-D depth via cos(yaw) correlation · eye-ratio consistency · landmark velocity naturalness |
 | **TFLite Models** | FaceAntiSpoofing (3.9 MB) + MiniFASNet-V2 (1.7 MB) — both auto-download & run in background isolates |
 | **Frame Quality** | BT.601 platform-correct brightness (NV21 + BGRA8888), blur, overexposure — 6-frame debounce |
+| **Face Mesh** | MediaPipe Face Mesh (468 3-D landmarks) via `enableFaceMesh: true` — depth score exposed via `liveMeshDepthScore` |
 | **Replay Guard** | FNV-1a frame hashing detects looped / static-image attacks |
 | **Session Security** | Cryptographically unique session IDs via `Random.secure()` |
 | **Action Randomisation** | Fisher-Yates shuffle prevents predictable replay attacks |
@@ -136,30 +138,6 @@ config: LivenessConfig(
 
 ---
 
-## Accessory Validation
-
-When `enableAccessoryValidation: true`, the SDK blocks verification if the user is wearing **sunglasses / goggles** or a **cap / hat**, and displays a suggestion message until they remove it.
-
-```dart
-FlutterFaceLiveness(
-  actions: [LivenessAction.blink, LivenessAction.turnLeft],
-  config: LivenessConfig(
-    enableAccessoryValidation: true,   // enable accessory check
-  ),
-  onSuccess: (result) { ... },
-  onFailed:  (reason) { ... },
-)
-```
-
-| Accessory | Status shown | Detection method |
-|-----------|-------------|-----------------|
-| Sunglasses / goggles | `"Please remove your sunglasses or goggles."` | Both eye-open probabilities < 0.25 for 6+ consecutive frames |
-| Cap / hat | `"Please remove your cap or hat."` | Forehead gap above eyes < 12% of face height for 6+ frames |
-
-> **Note:** Regular (transparent) glasses are not blocked — ML Kit can see through them and they do not affect face embeddings or liveness detection.
-
----
-
 ## Use Cases
 
 ### KYC (Know Your Customer)
@@ -213,6 +191,7 @@ FlutterFaceLiveness(
   actions: [LivenessAction.blink],
   config: LivenessConfig(
     enableFaceId: true,
+    faceIdMode: FaceIdMode.auto,
     enableAntiSpoof: true,
     enableVideoReplayDetection: true,
   ),
@@ -314,7 +293,7 @@ FlutterFaceLiveness(
 
 ## Face Identity (Face ID)
 
-> **Key guarantee:** A Face ID (`FID-XXXX`) is permanently tied to one physical person's face — across sessions, restarts, days, and lighting changes.
+> **Key guarantee:** A Face ID (`FID-XXXX`) is permanently tied to one physical person's face — across sessions, restarts, days, and lighting changes. Embeddings are stored **encrypted on-device** (XOR stream cipher, per-installation key).
 >
 > ```
 > Day 1  →  FID-3A9F2B1C4E8D7F62   isFaceIdNew: true
@@ -323,25 +302,51 @@ FlutterFaceLiveness(
 > Different person → FID-A817C3F0B24E9D51  isFaceIdNew: true
 > ```
 
+### Operation modes (`FaceIdMode`)
+
+| Mode | Behaviour | Use case |
+|------|-----------|----------|
+| `FaceIdMode.auto` *(default)* | Match existing face → return its ID. Unknown face → register and return new ID | Combined login + registration flows |
+| `FaceIdMode.registrationOnly` | Register only. Rejects if face already exists (`faceAlreadyRegistered: true`) | One-time enrolment — guarantees one ID per person |
+| `FaceIdMode.verificationOnly` | Match only. Unknown faces fail with `"Face not recognized"` — never registers | Pure login flows where enrolment is separate |
+
 ### Enable it
 
 ```dart
+// Auto — match or register (default)
 FlutterFaceLiveness(
   actions: [LivenessAction.blink, LivenessAction.turnLeft],
   config: LivenessConfig(
     enableFaceId: true,
-    faceIdSimilarityThreshold: 0.65,
+    faceIdMode: FaceIdMode.auto,
   ),
   onSuccess: (result) {
-    final faceId = result.faceId!;
-    final isNew  = result.isFaceIdNew!;
-    if (isNew) {
-      print('New face registered: $faceId');
-    } else {
-      print('Welcome back: $faceId');
-    }
+    print(result.isFaceIdNew! ? 'Registered: ${result.faceId}' : 'Welcome back: ${result.faceId}');
+    print('Match score: ${result.faceMatchScore}');
   },
   onFailed: (reason) => print('Failed: $reason'),
+)
+
+// Registration only — duplicate prevention
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft],
+  config: LivenessConfig(
+    enableFaceId: true,
+    faceIdMode: FaceIdMode.registrationOnly,
+  ),
+  onSuccess: (result) => print('Enrolled: ${result.faceId}'),
+  onFailed: (reason) => print(reason), // "Face already registered"
+)
+
+// Verification only — login flow
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft],
+  config: LivenessConfig(
+    enableFaceId: true,
+    faceIdMode: FaceIdMode.verificationOnly,
+  ),
+  onSuccess: (result) => print('Login OK: ${result.faceId}'),
+  onFailed: (reason) => print(reason), // "Face not recognized — please register first"
 )
 ```
 
@@ -350,9 +355,10 @@ FlutterFaceLiveness(
 ```dart
 await controller.clearFaceIdentities();  // delete all on logout
 
-final service = FaceIdentityService(similarityThreshold: 0.65);
+final service = FaceIdentityService();
 await service.initialize();
-List<String> ids = service.registeredFaceIds;
+List<String> ids = service.registeredFaceIds;  // all enrolled face IDs
+int total = service.totalEmbeddingCount;        // total embeddings stored
 await service.removeFace('FID-3A9F2B…');
 await service.clearAllFaces();
 service.dispose();
@@ -362,10 +368,13 @@ service.dispose();
 
 | Threshold | Behaviour |
 |-----------|-----------|
-| `0.50` | Very lenient |
-| `0.65` | **Default** — good balance |
-| `0.72` | Stricter — recommended for banking |
-| `0.80` | Very strict |
+| `0.72` | Lenient |
+| `0.82` | **Default** — gallery-based best-of-5 matching |
+| `0.86` | Stricter — recommended for banking / high-security |
+
+> **`registrationDuplicateThreshold`** (default `0.75`) — used only in `registrationOnly` mode. Intentionally lower than `faceIdSimilarityThreshold` so borderline cases are rejected rather than double-registered.
+
+> **`minEmbeddingQuality`** (default `0.50`) — embeddings below this quality score (L2 norm + variance check) are discarded before averaging. Prevents degenerate low-light or motion-blur crops from polluting the gallery.
 
 ---
 
@@ -398,12 +407,15 @@ LivenessConfig({
   double faceTooFarRatio   = 0.015,
   double faceTooCloseRatio = 0.70,
 
-  // Accessory Validation
-  bool   enableAccessoryValidation   = false,
+  // Face Mesh (MediaPipe 468 landmarks)
+  bool   enableFaceMesh  = false,
 
   // Face Identity
-  bool   enableFaceId                = false,
-  double faceIdSimilarityThreshold   = 0.65,
+  bool       enableFaceId                      = false,
+  FaceIdMode faceIdMode                        = FaceIdMode.auto,
+  double     faceIdSimilarityThreshold         = 0.82,
+  double     registrationDuplicateThreshold    = 0.75,
+  double     minEmbeddingQuality               = 0.50,
 
   // TFLite anti-spoof (FaceAntiSpoofing, 3.9 MB — auto-download)
   bool    enableTFLite            = false,
@@ -444,9 +456,12 @@ LivenessConfig({
 | `duplicateFrameWindowSize` | `int` | `8` | Sliding window size |
 | `faceTooFarRatio` | `double` | `0.015` | Bbox area ratio below which = too far |
 | `faceTooCloseRatio` | `double` | `0.70` | Bbox area ratio above which = too close |
-| `enableAccessoryValidation` | `bool` | `false` | Block verification if sunglasses/goggles or cap/hat detected |
+| `enableFaceMesh` | `bool` | `false` | MediaPipe Face Mesh (468 3-D landmarks); exposes `liveMeshDepthScore` |
 | `enableFaceId` | `bool` | `false` | Persistent face identity via FaceNet TFLite |
-| `faceIdSimilarityThreshold` | `double` | `0.65` | Cosine similarity cutoff |
+| `faceIdMode` | `FaceIdMode` | `auto` | `auto` · `registrationOnly` · `verificationOnly` |
+| `faceIdSimilarityThreshold` | `double` | `0.82` | Cosine similarity cutoff for matching (gallery best-of-5) |
+| `registrationDuplicateThreshold` | `double` | `0.75` | Duplicate block threshold for `registrationOnly` mode |
+| `minEmbeddingQuality` | `double` | `0.50` | Discard embeddings below this quality score before averaging |
 | `enableTFLite` | `bool` | `false` | FaceAntiSpoofing model (auto-downloads 3.9 MB, cached) |
 | `tfliteModelPath` | `String?` | `null` | Override: asset key or absolute path |
 | `tfliteModelUrl` | `String?` | `null` | Override: custom download URL |
@@ -500,18 +515,22 @@ actions: [LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRigh
 class LivenessResult {
   final bool   isSuccess;
   final List<LivenessAction> completedActions;
-  final double confidenceScore;       // 0.0–1.0 composite anti-spoof score
+  final double confidenceScore;         // 0.0–1.0 composite anti-spoof score
   final bool   isRealHuman;
   final bool   spoofDetected;
-  final bool   deepfakeDetected;      // true if TFLite score < tfliteDeepfakeThreshold
-  final double? tfliteScore;          // FaceAntiSpoofing real-face probability
-  final double? videoReplayScore;     // MiniFASNet real-face probability (min of 8 signals)
-  final bool   videoReplayDetected;   // true when videoReplayScore < videoReplayThreshold
+  final bool   deepfakeDetected;        // true if TFLite score < tfliteDeepfakeThreshold
+  final double? tfliteScore;            // FaceAntiSpoofing real-face probability
+  final double? videoReplayScore;       // MiniFASNet real-face probability (min of 8 signals)
+  final bool   videoReplayDetected;     // true when videoReplayScore < videoReplayThreshold
   final String? failureReason;
   final int?   sessionDurationMs;
-  final String? sessionId;            // "LV-{12-char-hex}-{8-char-hex}"
-  final String? faceId;               // "FID-{24-char-hex}" — when enableFaceId: true
-  final bool?  isFaceIdNew;           // true = first time, false = recognised
+  final String? sessionId;              // "LV-{12-char-hex}-{8-char-hex}"
+
+  // Face Identity — non-null when enableFaceId: true
+  final String? faceId;                 // "FID-{24-char-hex}"
+  final bool?   isFaceIdNew;            // true = first-time, false = recognised
+  final bool?   faceAlreadyRegistered;  // true when registrationOnly + face already exists
+  final double? faceMatchScore;         // cosine similarity from gallery search (0.0–1.0)
 }
 ```
 
@@ -534,21 +553,29 @@ await controller.initialize();
 | Getter | Type | Description |
 |--------|------|-------------|
 | `isInitialized` | `bool` | True after camera + models ready |
+| `isComplete` | `bool` | True when all liveness actions finished |
 | `status` | `DetectionStatus` | Current detection state |
 | `currentAction` | `LivenessAction?` | Action user must perform now |
 | `completedActions` | `List<LivenessAction>` | Completed this session |
 | `remainingActions` | `List<LivenessAction>` | Still to complete |
-| `progress` | `double` | 0.0–1.0 completion |
+| `completedCount` | `int` | Number of completed actions |
+| `progress` | `double` | 0.0–1.0 completion fraction |
+| `sessionId` | `String?` | Current session ID (`LV-…`) |
 | `currentFace` | `FaceData?` | Latest detected face (includes landmark positions) |
 | `lastQuality` | `FrameQuality?` | Latest frame quality |
-| `liveHeuristicScore` | `double?` | S2 rolling score |
-| `liveLaplacianScore` | `double?` | S1 rolling Laplacian variance |
+| `tfliteWarning` | `String?` | Non-null if TFLite model failed to load or inference errored |
+| `tfliteModelDownloadProgress` | `double?` | 0.0–1.0 while TFLite model is downloading |
+| `faceIdModelDownloadProgress` | `double?` | 0.0–1.0 while FaceNet model is downloading |
+| `lastTfliteScore` | `double?` | Latest FaceAntiSpoofing real-face probability |
+| `lastVideoReplayScore` | `double?` | Latest MiniFASNet raw real-face score |
+| `liveHeuristicScore` | `double?` | S2 rolling brightness-variance score |
+| `liveLaplacianScore` | `double?` | S1 rolling Laplacian texture variance |
 | `liveHetScore` | `double?` | S3 motion heterogeneity CV² |
 | `liveReplayScore` | `double?` | S5 ReplayAnalyzer rolling score |
 | `liveScreenScore` | `double?` | S6 ScreenArtifactDetector rolling score |
 | `liveFlowScore` | `double?` | S7 OpticalFlowAnalyzer rolling score |
 | `liveGeoScore` | `double?` | S8 FaceGeometryAnalyzer rolling score |
-| `lastTfliteScore` | `double?` | Latest TFLite real-face probability |
+| `liveMeshDepthScore` | `double?` | Face Mesh 3-D depth score (non-null when `enableFaceMesh: true`) |
 | `error` | `String?` | Non-null if initialization failed |
 | `cameraController` | `CameraController?` | Underlying camera controller |
 
@@ -566,8 +593,7 @@ await controller.initialize();
 | `overExposed` | Too bright (6-frame debounce) |
 | `blurry` | Out of focus |
 | `fakeDetected` | Spoof / duplicate-frame triggered |
-| `wearingSunglasses` | Sunglasses or goggles detected — shown when `enableAccessoryValidation: true` |
-| `wearingCap` | Cap or hat detected — shown when `enableAccessoryValidation: true` |
+| `ready` | Face detected and centred — waiting for action to begin |
 | `actionInProgress` | Performing challenge |
 | `completed` | All actions done |
 | `failed` | Timed out or manually failed |
@@ -691,6 +717,58 @@ Camera stream (20 fps)
 
 ---
 
+## Lighting & Brightness
+
+The SDK checks frame brightness on every camera frame using BT.601 platform-correct luminance (NV21 Y-plane on Android, weighted RGB on iOS). Poor lighting is one of the most common causes of slow or failed detection.
+
+### How it works
+
+| Condition | Status triggered | Threshold |
+|-----------|-----------------|-----------|
+| Too dark | `DetectionStatus.lowLight` | Luminance < `brightnessMin` (default `0.12`) |
+| Too bright / overexposed | `DetectionStatus.overExposed` | Luminance > `brightnessMax` (default `0.92`) |
+
+Both statuses use a **6-frame debounce** — the camera must report bad brightness for 6 consecutive frames before the status changes. This absorbs auto-exposure settling time when the user first points the camera.
+
+### What gets affected
+
+**ML Kit face detection**
+- Blink, turn, and smile detection all rely on accurate landmark positions. In very low light, ML Kit's keypoints become noisy or disappear entirely — actions may not register.
+
+**Face ID embeddings**
+- Low-light or overexposed crops produce face embeddings with degenerate L2 norm or near-zero variance. These are automatically discarded by the `minEmbeddingQuality` filter (`0.50` default). If all collected frames are rejected, face matching cannot complete.
+
+**Anti-spoof score**
+- The `AntiSpoofEngine` includes brightness variance as one of its 9 heuristic signals. Extremely low or high brightness reduces the composite `confidenceScore`, which may push it below `antiSpoofThreshold` and fail the session.
+
+**Video replay detection (S1, S2)**
+- S1 (Laplacian texture variance) drops in low light — skin micro-texture is lost in noise. This can lower the replay score on genuine faces.
+- S2 (temporal brightness variance) expects subtle room-light fluctuation. Pitch-black or blown-out environments produce flat variance scores.
+
+### Best lighting conditions
+
+- Soft indoor ceiling light or natural daylight **facing the user** (not behind them)
+- Avoid strong backlighting (window behind the user) — causes face underexposure
+- Avoid direct sunlight into the camera — causes overexposure
+- Minimum ~100 lux equivalent; standard office lighting is ideal
+
+### Tuning
+
+```dart
+config: LivenessConfig(
+  enableBrightnessCheck: true,   // default — always keep enabled
+  brightnessMin: 0.10,           // lower if users are in dimmer environments
+  brightnessMax: 0.95,           // raise if outdoor users hit false overexposure
+)
+
+// Disable entirely only for controlled kiosk setups with fixed lighting:
+config: LivenessConfig(
+  enableBrightnessCheck: false,
+)
+```
+
+---
+
 ## Security
 
 | Threat | Mitigation |
@@ -717,7 +795,7 @@ cd example
 flutter run
 ```
 
-Four challenge presets: Standard · Extended · Full · With Face ID.
+Six challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face.
 
 **Testing replay detection:**
 1. Enable `showDebugOverlay: true` in the example config

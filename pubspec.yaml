@@ -14,6 +14,7 @@ dependencies:
   flutter:
     sdk: flutter
   google_mlkit_face_detection: ^0.13.2
+  google_mlkit_face_mesh_detection: ^0.4.2
   camera: ^0.12.0+1
   provider: ^6.1.5+1
   permission_handler: ^12.0.1

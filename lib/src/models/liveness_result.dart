@@ -19,6 +19,8 @@ class LivenessResult {
     this.sessionId,
     this.faceId,
     this.isFaceIdNew,
+    this.faceAlreadyRegistered,
+    this.faceMatchScore,
   });
 
   /// Convenience constructor for a successful result.
@@ -87,9 +89,25 @@ class LivenessResult {
   final int? sessionDurationMs;
   final String? sessionId;
 
-  /// Persistent face identity — non-null only when [LivenessConfig.enableFaceId] is true.
+  // ── Face Identity ────────────────────────────────────────────────────────
+  /// Persistent face ID — non-null only when [LivenessConfig.enableFaceId] is true.
   final String? faceId;
+
+  /// True when [faceId] was newly registered in this session.
+  /// False when an existing face was matched.
   final bool? isFaceIdNew;
+
+  /// True when [LivenessConfig.faceIdMode] is [FaceIdMode.registrationOnly]
+  /// and the face was found to already be registered.
+  ///
+  /// When this is true, [faceId] contains the existing face's ID and the
+  /// session result will be a failure with reason "Face already registered".
+  final bool? faceAlreadyRegistered;
+
+  /// The cosine similarity score from the gallery search (0.0–1.0).
+  /// Useful for debugging and UI feedback (e.g. "how confident is the match").
+  /// Non-null when [enableFaceId] is true.
+  final double? faceMatchScore;
 
   // ── Copy helpers ─────────────────────────────────────────────────────────
 
@@ -102,8 +120,17 @@ class LivenessResult {
           {required bool videoReplayDetected}) =>
       _copy(videoReplayScore: score, videoReplayDetected: videoReplayDetected);
 
-  LivenessResult withFaceId(String id, {required bool isNew}) =>
-      _copy(faceId: id, isFaceIdNew: isNew);
+  LivenessResult withFaceId(
+    String id, {
+    required bool isNew,
+    bool alreadyRegistered = false,
+    double? matchScore,
+  }) => _copy(
+    faceId: id,
+    isFaceIdNew: isNew,
+    faceAlreadyRegistered: alreadyRegistered,
+    faceMatchScore: matchScore,
+  );
 
   LivenessResult _copy({
     double? tfliteScore,
@@ -112,6 +139,8 @@ class LivenessResult {
     bool? videoReplayDetected,
     String? faceId,
     bool? isFaceIdNew,
+    bool? faceAlreadyRegistered,
+    double? faceMatchScore,
   }) =>
       LivenessResult(
         isSuccess: isSuccess,
@@ -128,6 +157,8 @@ class LivenessResult {
         sessionId: sessionId,
         faceId: faceId ?? this.faceId,
         isFaceIdNew: isFaceIdNew ?? this.isFaceIdNew,
+        faceAlreadyRegistered: faceAlreadyRegistered ?? this.faceAlreadyRegistered,
+        faceMatchScore: faceMatchScore ?? this.faceMatchScore,
       );
 
   @override
@@ -137,5 +168,8 @@ class LivenessResult {
       'spoof: $spoofDetected, '
       'deepfake: $deepfakeDetected, '
       'videoReplay: $videoReplayDetected, '
+      'faceId: $faceId, '
+      'faceAlreadyRegistered: $faceAlreadyRegistered, '
+      'faceMatchScore: ${faceMatchScore?.toStringAsFixed(3)}, '
       'actions: $completedActions)';
 }

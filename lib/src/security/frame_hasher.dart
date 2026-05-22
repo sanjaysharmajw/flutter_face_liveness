@@ -4,7 +4,7 @@
 /// The FNV-1a hash is computed by [FrameProcessor] in the background isolate
 /// and passed here via [FrameQuality.frameHash].
 class FrameHasher {
-  FrameHasher({this.windowSize = 8, this.maxDuplicates = 6});
+  FrameHasher({this.windowSize = 10, this.maxDuplicates = 10});
 
   /// Number of recent hashes to keep.
   final int windowSize;

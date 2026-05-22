@@ -1,4 +1,5 @@
 import '../models/face_data.dart';
+import '../models/face_mesh_data.dart';
 import '../models/liveness_action.dart';
 
 /// Detects directional head movements using Euler angle thresholds.
@@ -14,17 +15,16 @@ import '../models/liveness_action.dart';
 ///   1. The angle exceeds the peak threshold for at least [_holdDurationMs].
 ///   2. The head returns back inside the neutral zone.
 class HeadMovementDetector {
-  // Lowered from 15° → 12°: cheap Android devices under-report yaw/pitch via
-  // ML Kit even when the user clearly turns; 12° still prevents accidental fire.
+  // 12° threshold: above natural head sway (3–8°) but responds to a clear
+  // intentional turn. 10° caused false fires from normal seated head movement.
   static const double _yawThreshold   = 12.0;
   static const double _pitchThreshold = 12.0;
   static const double _neutralYaw     = 6.0;
   static const double _neutralPitch   = 6.0;
-  // 50ms is one frame at 20 fps — fast enough for genuine movement, still
-  // blocks single-frame noise from a shaky device.
-  static const int    _holdDurationMs = 50;
-  // 600ms: shorter dead zone between consecutive actions (was 800ms).
-  static const int    _debounceMs     = 600;
+  // 0ms: fire on the very first frame crossing the threshold.
+  static const int    _holdDurationMs = 0;
+  // 400ms: was 600ms — enough to prevent double-fire, shorter dead zone.
+  static const int    _debounceMs     = 400;
 
   _MovementState _yawState   = _MovementState.neutral;
   _MovementState _pitchState = _MovementState.neutral;
@@ -34,17 +34,25 @@ class HeadMovementDetector {
   int _lastTriggerMs    = 0;
 
   /// Returns the completed [LivenessAction], or null if nothing was detected.
-  LivenessAction? process(FaceData face) {
+  ///
+  /// When [meshData] is supplied, uses geometric head-pose estimates derived
+  /// from 3-D Face Mesh landmarks instead of ML Kit Euler angles. The mesh
+  /// signal is consistent across devices — ML Kit angles can under-report
+  /// rotation by 30–40 % on budget Android hardware.
+  LivenessAction? process(FaceData face, {FaceMeshData? meshData}) {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     if (nowMs - _lastTriggerMs < _debounceMs) return null;
 
-    final yawResult = _processYaw(face.headEulerAngleY, nowMs);
+    final yaw   = meshData?.headYawDeg   ?? face.headEulerAngleY;
+    final pitch = meshData?.headPitchDeg ?? face.headEulerAngleX;
+
+    final yawResult = _processYaw(yaw, nowMs);
     if (yawResult != null) {
       _lastTriggerMs = nowMs;
       return yawResult;
     }
 
-    final pitchResult = _processPitch(face.headEulerAngleX, nowMs);
+    final pitchResult = _processPitch(pitch, nowMs);
     if (pitchResult != null) {
       _lastTriggerMs = nowMs;
       return pitchResult;

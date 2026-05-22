@@ -7,6 +7,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 
 import 'models/face_data.dart';
+import 'models/face_mesh_data.dart';
 import 'models/liveness_action.dart';
 import 'models/liveness_config.dart';
 import 'models/liveness_result.dart';
@@ -34,7 +35,9 @@ class LivenessController extends ChangeNotifier {
     required this.onFailed,
     LivenessConfig config = const LivenessConfig(),
   })  : _actions = actions,
-        _config  = config;
+        _config  = config {
+    _faceDetector = FaceDetectorService(enableFaceMesh: config.enableFaceMesh);
+  }
 
   final List<LivenessAction> _actions;
   final LivenessConfig _config;
@@ -42,7 +45,7 @@ class LivenessController extends ChangeNotifier {
   final void Function(String reason)          onFailed;
 
   final CameraService _cameraService = CameraService();
-  final FaceDetectorService _faceDetector = FaceDetectorService();
+  late final FaceDetectorService _faceDetector;
   TFLiteService?        _tflite;
   TFLiteService?        _videoReplay;
   FaceIdentityService?  _faceIdentity;
@@ -53,6 +56,17 @@ class LivenessController extends ChangeNotifier {
   FaceData?      _currentFace;
   FrameQuality?  _lastQuality;
   RawFrameData?  _lastRawFrame;
+  FaceMeshData?  _lastMeshData;
+
+  // Up to 5 frontal frames collected during the session (|yaw|+|pitch| < 15°).
+  // Their embeddings are averaged at session end for a stable identity estimate.
+  static const int    _maxFrontalFrames   = 7;
+  static const double _frontalAngleLimit  = 20.0;
+  final List<({RawFrameData raw, FaceData face})> _frontalFrames = [];
+  // Best single frontal frame — fallback if no frames pass the angle limit.
+  RawFrameData?  _bestFrontalFrame;
+  FaceData?      _bestFrontalFace;
+  double         _bestFrontalScore = double.infinity;
   String?        _error;
   double?        _faceIdModelDownloadProgress;
   double?        _tfliteModelDownloadProgress;
@@ -124,6 +138,9 @@ class LivenessController extends ChangeNotifier {
   double?         get liveScreenScore        => _liveScreenScore;
   double?         get liveFlowScore          => _liveFlowScore;
   double?         get liveGeoScore           => _liveGeoScore;
+  /// 3-D depth plausibility from Face Mesh (0.0 = flat/spoof, 1.0 = real face).
+  /// Non-null only when [LivenessConfig.enableFaceMesh] is true and a face is detected.
+  double?         get liveMeshDepthScore     => _lastMeshData?.depth3DScore;
   String?         get error           => _error;
   CameraController? get cameraController => _cameraService.controller;
 
@@ -250,7 +267,10 @@ class LivenessController extends ChangeNotifier {
       if (_config.enableFaceId) {
         try {
           _faceIdentity = FaceIdentityService(
-            similarityThreshold: _config.faceIdSimilarityThreshold,
+            similarityThreshold:             _config.faceIdSimilarityThreshold,
+            registrationDuplicateThreshold:  _config.registrationDuplicateThreshold,
+            minEmbeddingQuality:             _config.minEmbeddingQuality,
+            mode:                            _config.faceIdMode,
           );
           await _faceIdentity!.initialize(
             onModelDownloadProgress: (p) {
@@ -318,7 +338,28 @@ class LivenessController extends ChangeNotifier {
 
     _currentFace  = result.faces.isNotEmpty ? result.faces.first : null;
     _lastQuality  = result.quality;
-    if (result.rawFrame != null) _lastRawFrame = result.rawFrame;
+    if (result.rawFrame  != null) _lastRawFrame = result.rawFrame;
+    if (result.meshData  != null) _lastMeshData = result.meshData;
+
+    // Collect frontal frames for Face ID — multiple frames are averaged at
+    // session end for a stable embedding (single-frame embeddings are noisy).
+    if (_config.enableFaceId && _currentFace != null && result.rawFrame != null) {
+      final frontality = _currentFace!.headEulerAngleY.abs() + _currentFace!.headEulerAngleX.abs();
+      // Best single frame (fallback)
+      if (frontality < _bestFrontalScore) {
+        _bestFrontalScore = frontality;
+        _bestFrontalFrame = result.rawFrame;
+        _bestFrontalFace  = _currentFace;
+      }
+      // Only collect frames where eye landmarks are available — these produce
+      // eye-aligned embeddings. Bbox-fallback embeddings are too noisy to average.
+      if (frontality < _frontalAngleLimit &&
+          _frontalFrames.length < _maxFrontalFrames &&
+          _currentFace!.leftEyePosition != null &&
+          _currentFace!.rightEyePosition != null) {
+        _frontalFrames.add((raw: result.rawFrame!, face: _currentFace!));
+      }
+    }
 
     // Fire TFLite anti-spoof inference async; result is stored in _lastTfliteScore
     // and attached to LivenessResult at session end. Guard with _isTfliteRunning
@@ -457,7 +498,7 @@ class LivenessController extends ChangeNotifier {
       _liveGeoScore = _geoAnalyzer.liveScore;
     }
 
-    _engine?.processFrame(result.faces, quality: result.quality);
+    _engine?.processFrame(result.faces, quality: result.quality, meshData: result.meshData);
     notifyListeners();
   }
 
@@ -528,12 +569,24 @@ class LivenessController extends ChangeNotifier {
       final geoScore = _geoAnalyzer.liveScore;
       debugPrint('[VR-GEO] geo=${geoScore?.toStringAsFixed(3) ?? "n/a"}');
 
-      // Combine: minimum across all available signals
-      double finalScore = lapScore ?? brightScore;
-      if (lapScore    != null) finalScore = min(finalScore, brightScore);
-      if (hetScore    != null) finalScore = min(finalScore, hetScore);
-      if (modelScore  != null) finalScore = min(finalScore, modelScore);
-      finalScore = min(finalScore, raResult.overallScore);
+      // Combine — two-tier strategy to eliminate false positives on real humans:
+      //
+      //  SOFT signals (averaged): individually unreliable — stable LED room
+      //   lighting keeps brightScore low for real humans; hetScore is low when
+      //   the user holds still between actions.  Averaging prevents any single
+      //   soft signal from vetoing the whole detection.
+      //
+      //  HARD signals (min): high-confidence discriminators that are almost
+      //   never low for a real human — screenScore (skin warmth + no specular
+      //   highlight matches a screen), flowScore (natural motion), geoScore
+      //   (3-D face geometry).  A single hard-signal failure still vetoes.
+      final softSignals = <double>[brightScore, raResult.overallScore];
+      if (lapScore   != null) softSignals.add(lapScore);
+      if (hetScore   != null) softSignals.add(hetScore);
+      if (modelScore != null) softSignals.add(modelScore);
+      final softScore = softSignals.reduce((a, b) => a + b) / softSignals.length;
+
+      double finalScore = softScore;
       if (screenScore != null) finalScore = min(finalScore, screenScore);
       if (flowScore   != null) finalScore = min(finalScore, flowScore);
       if (geoScore    != null) finalScore = min(finalScore, geoScore);
@@ -561,21 +614,76 @@ class LivenessController extends ChangeNotifier {
       }
     }
 
-    // Resolve persistent faceId after successful liveness
-    if (result.isSuccess && _faceIdentity != null && _currentFace != null) {
-      final raw = _lastRawFrame;
-      if (raw != null) {
-        final match = await _faceIdentity!.identifyFromFrame(
-          imageBytes:        raw.imageBytes,
-          imageWidth:        raw.imageWidth,
-          imageHeight:       raw.imageHeight,
-          faceBoundingBox:   _currentFace!.boundingBox,
-          sensorOrientation: raw.sensorOrientation,
-        );
-        if (match != null) {
-          finalResult = finalResult.withFaceId(match.faceId, isNew: match.isNew);
+    // Resolve persistent faceId after successful liveness.
+    // Average embeddings from multiple frontal frames for a stable identity.
+    if (result.isSuccess && _faceIdentity != null) {
+      debugPrint('[FaceId] frontalFrames=${_frontalFrames.length}  bestScore=${_bestFrontalScore.toStringAsFixed(1)}°');
+
+      // Determine frames to process: collected frontal frames, or fallback to best single
+      final framesToProcess = _frontalFrames.isNotEmpty
+          ? _frontalFrames
+          : () {
+              final raw  = _bestFrontalFrame ?? _lastRawFrame;
+              final face = _bestFrontalFace  ?? _currentFace;
+              if (raw != null && face != null) return [(raw: raw, face: face)];
+              return <({RawFrameData raw, FaceData face})>[];
+            }();
+
+      if (framesToProcess.isNotEmpty) {
+        // Compute embedding for each frame in parallel sequence
+        final embeddings = <List<double>>[];
+        for (final f in framesToProcess) {
+          final emb = await _faceIdentity!.computeEmbedding(
+            imageBytes:        f.raw.imageBytes,
+            imageWidth:        f.raw.imageWidth,
+            imageHeight:       f.raw.imageHeight,
+            faceBoundingBox:   f.face.boundingBox,
+            sensorOrientation: f.raw.sensorOrientation,
+            leftEyeX:          f.face.leftEyePosition?.x,
+            leftEyeY:          f.face.leftEyePosition?.y,
+            rightEyeX:         f.face.rightEyePosition?.x,
+            rightEyeY:         f.face.rightEyePosition?.y,
+          );
+          if (emb != null) embeddings.add(emb);
+        }
+
+        if (embeddings.isNotEmpty) {
+          final match = await _faceIdentity!.identifyFromEmbeddings(embeddings);
+          if (match != null) {
+            if (match.isDuplicate) {
+              // registrationOnly mode: face already exists — block registration
+              debugPrint('[FaceId] Registration blocked — duplicate face ${match.faceId}  '
+                  'sim=${match.similarity.toStringAsFixed(3)}');
+              finalResult = finalResult.withFaceId(
+                match.faceId ?? '',
+                isNew: false,
+                alreadyRegistered: true,
+                matchScore: match.similarity,
+              );
+            } else if (match.isNotFound) {
+              // verificationOnly mode: no matching face — fail the session
+              debugPrint('[FaceId] Verification failed — face not found  '
+                  'bestSim=${match.similarity.toStringAsFixed(3)}');
+              onFailed('Face not recognized — please register first');
+              notifyListeners();
+              return;
+            } else if (match.faceId != null) {
+              finalResult = finalResult.withFaceId(
+                match.faceId!,
+                isNew: match.isNew,
+                matchScore: match.similarity,
+              );
+            }
+          }
         }
       }
+    }
+
+    // Block duplicate registration (registrationOnly mode)
+    if (finalResult.faceAlreadyRegistered == true) {
+      onFailed('Face already registered');
+      notifyListeners();
+      return;
     }
 
     // Reject session if video replay attack detected, regardless of liveness result
@@ -832,6 +940,11 @@ class LivenessController extends ChangeNotifier {
     _currentFace                 = null;
     _lastQuality                 = null;
     _lastRawFrame                = null;
+    _lastMeshData                = null;
+    _frontalFrames.clear();
+    _bestFrontalFrame            = null;
+    _bestFrontalFace             = null;
+    _bestFrontalScore            = double.infinity;
     _lastTfliteScore             = null;
     _isTfliteRunning             = false;
     _tfliteFuture                = null;

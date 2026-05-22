@@ -2,6 +2,27 @@
 
 ### New Features
 
+- **Face ID operation modes (`FaceIdMode`)** — three distinct modes replace the previous single-threshold matching:
+  - `FaceIdMode.auto` *(default)* — match existing face or register new one
+  - `FaceIdMode.registrationOnly` — enrolment-only; rejects duplicate registrations with `onFailed("Face already registered")`. Use for one-time sign-up flows that guarantee one ID per person
+  - `FaceIdMode.verificationOnly` — login-only; never registers unknown faces; fails with `onFailed("Face not recognized — please register first")`
+  - Configured via `LivenessConfig.faceIdMode`
+
+- **`FaceMatchResult` / `FaceMatchOutcome`** — rich result types returned by `FaceIdentityService.identifyFromEmbeddings()`:
+  - `FaceMatchOutcome` enum: `matched`, `registered`, `alreadyExists`, `notFound`
+  - `FaceMatchResult` fields: `outcome`, `faceId`, `similarity`, `qualityScore`
+
+- **`LivenessResult` new fields**:
+  - `faceAlreadyRegistered` (`bool?`) — `true` when `registrationOnly` mode detects a duplicate face
+  - `faceMatchScore` (`double?`) — cosine similarity returned from gallery search; useful for UI feedback
+
+- **`LivenessConfig` new fields**:
+  - `faceIdMode` (`FaceIdMode`, default `FaceIdMode.auto`)
+  - `registrationDuplicateThreshold` (`double`, default `0.75`) — duplicate block threshold for `registrationOnly`; intentionally lower than `faceIdSimilarityThreshold` to reject borderline cases
+  - `minEmbeddingQuality` (`double`, default `0.50`) — discard degenerate embeddings (bad L2 norm, near-zero variance) before averaging
+
+- **Encrypted embedding storage (v4)** — face embeddings are now stored as XOR-encrypted Float32 bytes (base64-encoded) using a 64-byte per-installation key generated with `Random.secure()` on first run. Key stored in `SharedPreferences`; gallery stored under key `ffl_known_faces_v4`. Previous unencrypted galleries (v1–v3) are automatically invalidated on first launch.
+
 - **Accessory Validation** — `LivenessConfig.enableAccessoryValidation` (default `false`). When enabled, verification is blocked if the user is wearing sunglasses/goggles or a cap/hat, with a clear suggestion message shown in the status badge. Detection is purely heuristic — no extra model required:
   - `wearingSunglasses` — both eye-open probabilities < 0.25 for 6+ consecutive frames
   - `wearingCap` — forehead gap above eye landmarks < 12% of face bounding-box height for 6+ frames
@@ -10,6 +31,16 @@
   - Blink action guard: sunglasses check is automatically skipped during blink challenge to prevent false positives from intentional eye closure
 
 ### Improvements
+
+- **Gallery-based face matching (best-of-5)** — `FaceIdentityService` now stores up to 5 embeddings per face ID (rolling window, oldest dropped first). Matching uses the **maximum cosine similarity across all stored embeddings** for a face. This handles within-class variance (lighting, pose, expression) across sessions and significantly reduces false "new face" registrations.
+
+- **Eye-landmark filtered frame collection** — frontal frames are now only collected when both `leftEyePosition` and `rightEyePosition` landmarks are detected. This ensures all embeddings in the averaging pool are eye-aligned. The fallback (bounding-box-only crop) is still used when no frontal frames are available.
+
+- **Embedding quality filter** — embeddings with quality score below `minEmbeddingQuality` are discarded before averaging. Quality is scored 0.0–1.0 based on: L2 norm deviation from 1.0 (weight 0.60) + embedding variance (weight 0.40). Degenerate embeddings (all-zero, constant vector, out-of-range norm) score 0.0 and are always discarded.
+
+- **`faceIdSimilarityThreshold` default raised from `0.65` → `0.82`** — recalibrated for gallery-based best-of-5 matching. The higher threshold is reliable now that multiple aligned embeddings are averaged per session.
+
+- **`FaceIdentityService` constructor exposes all config** — `similarityThreshold`, `registrationDuplicateThreshold`, `minEmbeddingQuality`, `mode`, `maxEmbeddingsPerFace` are all constructor parameters.
 
 - **Faster action detection on low-end devices** — detection thresholds recalibrated based on real ML Kit output ranges across device tiers:
 
@@ -24,6 +55,10 @@
   | Smile | `> 0.80` | `> 0.72` | Natural smiles rarely reach 0.80 on ML Kit |
 
 ### Bug Fixes
+
+- **Face preprocessor inverse similarity transform (`cos(-srcAngle)` → `cos(srcAngle)`)** — `FacePreprocessor._alignedCrop()` used `math.cos(-srcAngle)` and `math.sin(-srcAngle)` for the inverse transform. For a tilted face (e.g. `srcAngle = -0.245 rad`), this mapped the output left-eye pixel to the wrong source y-coordinate (~70 px instead of ~90 px), producing misaligned crops and inconsistent embeddings across sessions. The correct inverse of the forward `R(-srcAngle)` rotation is `R(+srcAngle)`. Fixed by removing the negation.
+
+- **`verificationOnly` mode silently passed as success when face not found** — when `FaceIdMode.verificationOnly` found no matching face (`FaceMatchOutcome.notFound`), the controller printed a debug log but did not fail the session. If all liveness actions were completed, `onSuccess` was called with `isSuccess: true` and `faceId: null`. Fixed: `match.isNotFound` now immediately calls `onFailed('Face not recognized — please register first')` and returns, matching the `faceAlreadyRegistered` pattern.
 
 - **Camera never starts after model download (race condition)** — `LivenessController.initialize()` ran model downloads as a fire-and-forget coroutine. If the widget was disposed while a download was in progress, `_isDisposed` was set to `true` but `initialize()` continued and opened the camera anyway. `_processFrame()` then silently dropped all frames. Fixed by adding `if (_isDisposed) return` guards after each major `await` in the initialization chain — after each model download, after FaceID model load, and critically before `_cameraService.initialize()`.
 

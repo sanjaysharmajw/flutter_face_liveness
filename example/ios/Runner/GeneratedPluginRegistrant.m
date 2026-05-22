@@ -30,6 +30,12 @@
 @import google_mlkit_face_detection;
 #endif
 
+#if __has_include(<google_mlkit_face_mesh_detection/GoogleMlKitFaceMeshDetectionPlugin.h>)
+#import <google_mlkit_face_mesh_detection/GoogleMlKitFaceMeshDetectionPlugin.h>
+#else
+@import google_mlkit_face_mesh_detection;
+#endif
+
 #if __has_include(<path_provider_foundation/PathProviderPlugin.h>)
 #import <path_provider_foundation/PathProviderPlugin.h>
 #else
@@ -55,6 +61,7 @@
   [FlutterFaceLivenessPlugin registerWithRegistrar:[registry registrarForPlugin:@"FlutterFaceLivenessPlugin"]];
   [GoogleMlKitCommonsPlugin registerWithRegistrar:[registry registrarForPlugin:@"GoogleMlKitCommonsPlugin"]];
   [GoogleMlKitFaceDetectionPlugin registerWithRegistrar:[registry registrarForPlugin:@"GoogleMlKitFaceDetectionPlugin"]];
+  [GoogleMlKitFaceMeshDetectionPlugin registerWithRegistrar:[registry registrarForPlugin:@"GoogleMlKitFaceMeshDetectionPlugin"]];
   [PathProviderPlugin registerWithRegistrar:[registry registrarForPlugin:@"PathProviderPlugin"]];
   [PermissionHandlerPlugin registerWithRegistrar:[registry registrarForPlugin:@"PermissionHandlerPlugin"]];
   [SharedPreferencesPlugin registerWithRegistrar:[registry registrarForPlugin:@"SharedPreferencesPlugin"]];

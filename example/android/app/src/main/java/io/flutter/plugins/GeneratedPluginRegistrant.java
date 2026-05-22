@@ -41,6 +41,11 @@ public final class GeneratedPluginRegistrant {
       Log.e(TAG, "Error registering plugin google_mlkit_face_detection, com.google_mlkit_face_detection.GoogleMlKitFaceDetectionPlugin", e);
     }
     try {
+      flutterEngine.getPlugins().add(new com.google_mlkit_face_mesh_detection.GoogleMlKitFaceMeshDetectionPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin google_mlkit_face_mesh_detection, com.google_mlkit_face_mesh_detection.GoogleMlKitFaceMeshDetectionPlugin", e);
+    }
+    try {
       flutterEngine.getPlugins().add(new io.flutter.plugins.pathprovider.PathProviderPlugin());
     } catch (Exception e) {
       Log.e(TAG, "Error registering plugin path_provider_android, io.flutter.plugins.pathprovider.PathProviderPlugin", e);
