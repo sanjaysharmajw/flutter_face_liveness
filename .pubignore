@@ -1,0 +1,20 @@
+# Generated platform files (gitignored but checked in)
+example/.flutter-plugins
+example/.flutter-plugins-dependencies
+example/android/local.properties
+example/android/gradlew
+example/android/gradlew.bat
+example/android/app/src/main/java/io/flutter/plugins/
+example/ios/Flutter/Generated.xcconfig
+example/ios/Flutter/ephemeral/
+example/ios/Runner/GeneratedPluginRegistrant.h
+example/ios/Runner/GeneratedPluginRegistrant.m
+example/ios/Runner/GeneratedPluginRegistrant.swift
+
+# Large binary model files (auto-downloaded on first use — not bundled)
+assets/models/
+example/assets/
+
+# Build artifacts
+build/
+.dart_tool/
