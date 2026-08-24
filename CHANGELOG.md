@@ -1,3 +1,17 @@
+## 3.3.0
+
+### New Features
+
+- **YOLOv8n-face detection backend for face identity** — `FaceDetectorBackend` (`mlkit` default, `yolov8`) lets the identity/embedding pipeline use a YOLOv8n-face TFLite model instead of ML Kit's own landmarks for the face box + eye keypoints fed into `FaceEmbeddingModel`. Liveness actions (blink/smile/head-pose) always use ML Kit regardless of this setting, since only ML Kit exposes that classification output. Configured via `LivenessConfig.faceDetectorBackend`, `yoloModelUrl`, `yoloConfidenceThreshold`, `yoloIouThreshold`.
+  - `YoloFaceDetectorService` / `YoloFaceDetection` — TFLite inference + letterbox preprocessing + NMS decode (standard Ultralytics raw pose-export layout: box + confidence + 5 keypoints).
+  - `YoloModelDownloader` — same cache-on-first-use pattern as `FaceModelDownloader`/`TFLiteModelDownloader`.
+  - **Requires a manual one-time step**: export `yolov8n-face.pt` to `.tflite` and upload it as a release asset before this backend is usable — see `YoloModelDownloader.bundledModelUrl`. `mlkit` (default) needs no extra setup and is unaffected.
+
+- **`FaceCaptureService`** — enrollment/verification from a single captured photo (as opposed to a full live liveness session): decode → detect (either backend) → pre-capture quality gate (brightness/blur/face-size, distinct from `FaceIdentityService`'s post-hoc embedding-quality check) → eye-aligned crop → embed → match/register, reusing `FaceIdentityService`'s gallery so a person registered via live session or via photo capture is the same lookup. Returns `FaceCaptureResult` (either a `FaceMatchResult` or a pre-match rejection reason).
+  - `FaceEmbeddingModel`/`FacePreprocessor` gained a static-RGB entry point (`FacePreprocessor.prepareFromRgb`, `FaceIdentityService.computeEmbeddingFromRgb`) so the same loaded model/gallery serve both the live-frame and captured-photo paths — no duplicate model instance.
+
+- **`image` package** now a direct dependency (decoding captured photos for `FaceCaptureService`).
+
 ## 3.2.0
 
 ### New Features

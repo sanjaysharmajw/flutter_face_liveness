@@ -1,13 +1,18 @@
 # flutter_face_liveness
 
-[![pub version](https://img.shields.io/badge/pub-3.2.0-blue)](https://pub.dev/packages/flutter_face_liveness)
+[![pub version](https://img.shields.io/badge/pub-3.3.0-blue)](https://pub.dev/packages/flutter_face_liveness)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-☕-yellow)](https://buymeacoffee.com/sanjaysharmajw)
 
 ![flutter_face_liveness banner](https://raw.githubusercontent.com/sanjaysharmajw/flutter_face_liveness/main/screenshots/banner.png)
 
-Production-ready AI-powered Flutter SDK for **real-time face liveness detection, replay attack prevention, and persistent face identity** — powered by Google ML Kit + TensorFlow Lite. All processing runs **entirely on-device** with zero server calls (except one-time model downloads).
+Production-ready AI-powered Flutter SDK for **real-time face liveness detection, replay attack prevention, and persistent face identity** — powered by Google ML Kit, TensorFlow Lite, and an optional YOLOv8n-face detector backend. All processing runs **entirely on-device** with zero server calls (except one-time model downloads).
+
+> ### 🆕 New in v3.3.0 — YOLOv8n-face detector backend
+> Select `FaceDetectorBackend.yolov8` to run a YOLOv8n-face TFLite model — on its own background isolate, never blocking the camera — as an alternative to ML Kit for the identity/embedding pipeline. Works out of the box, no setup required. Also new: [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying a face from a single captured photo, no liveness session needed.
+>
+> → [Face Detector Backends (ML Kit / YOLOv8)](#face-detector-backends-ml-kit--yolov8)
 
 ---
 
@@ -15,11 +20,12 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 
 - [Features](#features)
 - [Replay Attack Detection](#replay-attack-detection)
-- [Accessory Validation](#accessory-validation)
 - [Use Cases](#use-cases)
 - [Getting Started](#getting-started)
 - [Quick Start](#quick-start)
 - [Face Identity (Face ID)](#face-identity-face-id)
+- [Face Detector Backends (ML Kit / YOLOv8)](#face-detector-backends-ml-kit--yolov8)
+- [Face Capture — Photo Enrollment & Verification](#face-capture--photo-enrollment--verification)
 - [LivenessConfig Reference](#livenessconfig-reference)
 - [Liveness Actions](#liveness-actions)
 - [LivenessResult Fields](#livenessresult-fields)
@@ -41,6 +47,8 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 | **Liveness** | 7 challenge actions — blink, turn left/right, look up/down, smile, open mouth |
 | **Face Landmarks** | 10 ML Kit landmark positions per frame (`leftEyePosition`, `rightEyePosition`, `noseBasePosition`, cheeks, mouth corners, ears) |
 | **Face ID** | Same face → always same ID, across sessions and restarts. Powered by FaceNet TFLite (auto-downloaded, ~23 MB) |
+| **Face Detector Backends** | `FaceDetectorBackend.mlkit` *(default)* or `.yolov8` — select which model supplies the face box/keypoints feeding the identity pipeline. Liveness actions always use ML Kit either way |
+| **Photo-Based Enrollment** | `FaceCaptureService` — enroll/verify from a single captured photo (no liveness challenge) using the same gallery and models as the live session flow |
 | **New/Returning** | `isFaceIdNew` flag — first-time or returning face |
 | **Anti-Spoof** | 9-signal composite engine — eye variance, geometry, pose, micro-motion, quality, tracking, brightness variance, motion jitter |
 | **8-Signal Replay Detection** | Five new pure-Dart signals (S5–S8) run alongside MiniFASNet. Final score = min of all signals — must defeat every layer simultaneously |
@@ -214,7 +222,7 @@ FlutterFaceLiveness(
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^3.2.0
+  flutter_face_liveness: ^3.3.0
 ```
 
 ### 2. Platform permissions
@@ -378,6 +386,113 @@ service.dispose();
 
 ---
 
+## Face Detector Backends (ML Kit / YOLOv8)
+
+> **Scope:** this setting only affects which detector supplies the face box + eye keypoints fed into the **identity/embedding pipeline** (`enableFaceId: true`). Liveness actions (blink, smile, head turns) always run on ML Kit, regardless of this setting — only ML Kit exposes the eye-open/smiling classification they need. Embedding and matching (FaceNet + gallery search) are identical either way; the backend choice never affects `FaceIdMode` behaviour or thresholds.
+
+```dart
+enum FaceDetectorBackend { mlkit, yolov8 }
+```
+
+| Backend | Behaviour | Extra setup |
+|---------|-----------|-------------|
+| `FaceDetectorBackend.mlkit` *(default)* | Reuses ML Kit's own landmarks — zero extra cost, since ML Kit already runs every frame for liveness | None |
+| `FaceDetectorBackend.yolov8` | Runs a second model (YOLOv8n-face, TFLite) on identity-eligible frames only (roughly the first 7–15 frames of a session, not continuously) — may improve box/keypoint accuracy on some angles/conditions | See below |
+
+### Enable it
+
+```dart
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft],
+  config: LivenessConfig(
+    enableFaceId: true,
+    faceDetectorBackend: FaceDetectorBackend.yolov8,
+    yoloConfidenceThreshold: 0.5,   // min detection confidence
+    yoloIouThreshold: 0.45,         // NMS overlap threshold
+  ),
+  onSuccess: (result) => print('Face ID: ${result.faceId}'),
+  onFailed:  (reason) => print('Failed: $reason'),
+)
+```
+
+### Setup — works out of the box
+
+`YoloModelDownloader.bundledModelUrl` already points to a YOLOv8n-face `.tflite` model hosted on this package's own GitHub Release (`v3.2.0-models`). **No setup is required** — just set `faceDetectorBackend: FaceDetectorBackend.yolov8` and the model downloads automatically on first use, exactly like the FaceNet/anti-spoof models.
+
+If the model fails to download or load (no internet, blocked host, etc.), the `yolov8` backend is silently disabled for that session and identity **falls back to ML Kit's own landmarks** — a failed YOLO download never blocks camera or liveness from starting.
+
+### Using your own custom model (optional)
+
+Only needed if you want to swap in a different/fine-tuned YOLOv8-face model instead of the bundled one:
+
+1. Get or train a face-trained YOLOv8n model — e.g. [`akanametov/yolo-face`](https://github.com/akanametov/yolo-face/releases) (`yolov8n-face.pt`).
+2. Export to TFLite:
+   ```sh
+   pip install ultralytics
+   yolo export model=yolov8n-face.pt format=tflite imgsz=640
+   ```
+   (If your local Python/PyTorch/TensorFlow versions are incompatible with this export chain, run the same two lines in a free [Google Colab](https://colab.research.google.com) notebook instead — upload the `.pt`, run the export, download the resulting `.tflite`.)
+3. Host the resulting `.tflite` file somewhere reachable by HTTPS and point `LivenessConfig.yoloModelUrl` at it:
+   ```dart
+   config: LivenessConfig(
+     enableFaceId: true,
+     faceDetectorBackend: FaceDetectorBackend.yolov8,
+     yoloModelUrl: 'https://your-host.com/your-custom-yolov8-face.tflite',
+   )
+   ```
+
+### Architecture
+
+- `YoloFaceDetectorService` — runs the TFLite model in its **own background isolate** (same pattern as the anti-spoof/video-replay models) so inference never blocks camera-frame delivery.
+- `YoloFaceDetection` — box + up to 5 keypoints (left eye, right eye, nose, mouth-left, mouth-right), decoded from the standard Ultralytics raw pose-export output layout (`[1, 4+1+15, N]`) with NMS applied.
+- Detects both NCHW (`[1,3,H,W]`) and NHWC (`[1,H,W,3]`) model input layouts automatically at load time — the layout depends on which export path produced your `.tflite` file.
+
+---
+
+## Face Capture — Photo Enrollment & Verification
+
+`FaceCaptureService` runs the same detect → align → embed → match pipeline as a live liveness session, but against a **single captured photo** instead of a camera stream — no liveness challenge, no session. Useful for "upload a photo to register" flows, or verifying against an ID-document photo.
+
+It shares the same `FaceIdentityService` gallery as `LivenessController` — a person registered through a live session is matched by a photo capture, and vice versa.
+
+```dart
+import 'dart:io';
+import 'package:flutter_face_liveness/flutter_face_liveness.dart';
+
+final identity = FaceIdentityService(mode: FaceIdMode.auto);
+await identity.initialize();
+
+final capture = FaceCaptureService(
+  faceIdentity: identity,
+  backend: FaceDetectorBackend.mlkit, // or .yolov8
+);
+await capture.initialize();
+
+final result = await capture.captureAndIdentify(File(photoPath));
+
+if (result.isRejected) {
+  print('Rejected: ${result.rejectionReason}');
+  // e.g. "No face detected", "Image too blurry", "Face too small — move closer"
+} else {
+  final match = result.match!;
+  print('Outcome: ${match.outcome}');   // matched / registered / notFound / alreadyExists
+  print('Face ID: ${match.faceId}');
+  print('Similarity: ${match.similarity}');
+}
+
+await capture.dispose();
+```
+
+### Pre-capture quality gate
+
+Before an embedding is even computed, the photo is checked against the same brightness/blur/size thresholds used for live frames (`LivenessConfig.brightnessMin/Max`, `blurThreshold`, `faceTooFarRatio/faceTooCloseRatio` — pass matching values to `FaceCaptureService`'s constructor if you've customised them elsewhere). This is a separate, earlier check than `FaceIdentityService`'s post-hoc `embeddingQuality()` filter — a bad photo is rejected before any inference runs on it.
+
+### EXIF orientation
+
+Captured photos carry an EXIF orientation tag rather than storing pixels upright; `FaceCaptureService` normalises this automatically before detection/cropping, so portrait photos (the common case) are handled correctly regardless of backend.
+
+---
+
 ## LivenessConfig Reference
 
 ```dart
@@ -416,6 +531,10 @@ LivenessConfig({
   double     faceIdSimilarityThreshold         = 0.82,
   double     registrationDuplicateThreshold    = 0.75,
   double     minEmbeddingQuality               = 0.50,
+  FaceDetectorBackend faceDetectorBackend      = FaceDetectorBackend.mlkit,
+  String?    yoloModelUrl                      = null,
+  double     yoloConfidenceThreshold           = 0.5,
+  double     yoloIouThreshold                  = 0.45,
 
   // TFLite anti-spoof (FaceAntiSpoofing, 3.9 MB — auto-download)
   bool    enableTFLite            = false,
@@ -462,6 +581,10 @@ LivenessConfig({
 | `faceIdSimilarityThreshold` | `double` | `0.82` | Cosine similarity cutoff for matching (gallery best-of-5) |
 | `registrationDuplicateThreshold` | `double` | `0.75` | Duplicate block threshold for `registrationOnly` mode |
 | `minEmbeddingQuality` | `double` | `0.50` | Discard embeddings below this quality score before averaging |
+| `faceDetectorBackend` | `FaceDetectorBackend` | `mlkit` | `mlkit` (reuse ML Kit landmarks, no extra cost) or `yolov8` (second model, identity-eligible frames only) |
+| `yoloModelUrl` | `String?` | `null` | Override download URL for the YOLOv8n-face model. `null` = `YoloModelDownloader.bundledModelUrl` |
+| `yoloConfidenceThreshold` | `double` | `0.5` | Minimum detection confidence for a YOLOv8n-face box to be kept |
+| `yoloIouThreshold` | `double` | `0.45` | IoU threshold for YOLOv8n-face non-max suppression |
 | `enableTFLite` | `bool` | `false` | FaceAntiSpoofing model (auto-downloads 3.9 MB, cached) |
 | `tfliteModelPath` | `String?` | `null` | Override: asset key or absolute path |
 | `tfliteModelUrl` | `String?` | `null` | Override: custom download URL |
@@ -566,6 +689,7 @@ await controller.initialize();
 | `tfliteWarning` | `String?` | Non-null if TFLite model failed to load or inference errored |
 | `tfliteModelDownloadProgress` | `double?` | 0.0–1.0 while TFLite model is downloading |
 | `faceIdModelDownloadProgress` | `double?` | 0.0–1.0 while FaceNet model is downloading |
+| `yoloModelDownloadProgress` | `double?` | 0.0–1.0 while YOLOv8n-face model is downloading (only relevant when `faceDetectorBackend: .yolov8`) |
 | `lastTfliteScore` | `double?` | Latest FaceAntiSpoofing real-face probability |
 | `lastVideoReplayScore` | `double?` | Latest MiniFASNet raw real-face score |
 | `liveHeuristicScore` | `double?` | S2 rolling brightness-variance score |
@@ -677,12 +801,21 @@ Camera stream (20 fps)
     ├─ TFLite inference (persistent background isolates)
     │     S4  MiniFASNet-V2            (video replay model)
     │         FaceAntiSpoofing         (deepfake model)
+    │         YoloFaceDetectorService  (identity-eligible frames only, faceDetectorBackend: yolov8)
     │
     ├─ LivenessEngine
     │     Active challenge tracking  ·  action detection  ·  timeout
     │
+    ├─ Face Identity (enableFaceId: true)
+    │     FacePreprocessor  →  FaceEmbeddingModel  →  FaceIdentityService (gallery match)
+    │     Box/eyes from ML Kit, or from YoloFaceDetectorService if selected
+    │
     └─ LivenessController (ChangeNotifier)
           Combine all signals  ·  build LivenessResult  ·  fire callbacks
+
+FaceCaptureService (standalone — photo, not a live session)
+    Decode photo → detect (ML Kit or YoloFaceDetectorService) → quality gate
+      → FacePreprocessor → FaceEmbeddingModel → same FaceIdentityService gallery
 ```
 
 **Threading model:**
@@ -693,6 +826,7 @@ Camera stream (20 fps)
 | YUV → NV21 + quality | Background isolate (`compute()`) |
 | S1–S3, S5–S8 pixel analysis | Main isolate (pure Dart, < 2 ms/frame) |
 | S4 TFLite inference | Persistent background isolate (zero-copy transfer) |
+| YOLOv8n-face inference | Persistent background isolate (zero-copy transfer) — same pattern as S4 |
 | FaceNet embedding | Background isolate (`compute()`) |
 | UI rendering | Main thread — never blocked |
 
@@ -707,13 +841,16 @@ Camera stream (20 fps)
 | S5–S8 signal computation (pure Dart) | < 2 ms/frame |
 | OpticalFlow 32×32 block-MAD | ~0.5 ms/frame |
 | FaceNet inference (warm) | 30–50 ms |
+| YOLOv8n-face inference (warm) | Not yet benchmarked on-device — runs on its own background isolate, so it adds isolate-worker overhead rather than blocking frame delivery; only invoked on identity-eligible frames (~7–15 per session), not continuously |
 | Memory — base | ~45 MB |
 | Memory — with Face ID | ~90 MB |
+| Memory — with `faceDetectorBackend: yolov8` | + a second TFLite interpreter (~12 MB model) in its own isolate — not yet measured in aggregate |
 
 **Tuning tips:**
 - Lower `targetFps` to `15` on low-end devices
 - Use `ResolutionPreset.medium` for 60 fps UI on older phones
 - Set `enableFaceId: false` if you don't need identity — saves ~45 MB RAM
+- `faceDetectorBackend: mlkit` (default) has zero extra cost over the base Face ID path — only switch to `yolov8` if you've measured a real accuracy benefit for your use case
 
 ---
 
@@ -808,7 +945,9 @@ Six challenge presets: Standard · Extended · Full · Face ID Auto · Register 
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
-Latest: **v3.2.0** — Accessory validation, faster action detection, camera initialization race condition fix, replay attack tuning guidance.
+Latest: **v3.3.0** — Optional YOLOv8n-face detector backend for the identity pipeline (`FaceDetectorBackend`), `FaceCaptureService` for photo-based enrollment/verification, both running on dedicated background isolates.
+
+Previous: **v3.2.0** — Accessory validation, faster action detection, camera initialization race condition fix, replay attack tuning guidance.
 
 ---
 

@@ -153,6 +153,10 @@ class FaceIdentityService {
     double? leftEyeY,
     double? rightEyeX,
     double? rightEyeY,
+    // Set true when faceBoundingBox/eye coordinates came from a detector
+    // that samples the raw camera buffer directly (e.g. YoloFaceDetectorService)
+    // rather than ML Kit — see FacePreprocessor.prepare's matching parameter.
+    bool coordinatesInSensorSpace = false,
   }) async {
     if (!isReady) return null;
     final eyeAligned = leftEyeX != null && leftEyeY != null &&
@@ -163,7 +167,37 @@ class FaceIdentityService {
       bbox: faceBoundingBox, sensorOrientation: sensorOrientation,
       leftEyeX: leftEyeX, leftEyeY: leftEyeY,
       rightEyeX: rightEyeX, rightEyeY: rightEyeY,
+      coordinatesInSensorSpace: coordinatesInSensorSpace,
     ));
+    if (input == null) return null;
+    return _model.infer(input);
+  }
+
+  /// Compute a single face embedding from an already-decoded RGB still image
+  /// — the [FaceCaptureService] counterpart to [computeEmbedding]'s raw
+  /// camera-frame path. Shares the same loaded [FaceEmbeddingModel], so no
+  /// extra model memory is used when both capture routes are active.
+  ///
+  /// [samplePixel] returns `(r, g, b)` for a source pixel in the decoded
+  /// image — supply this from whatever RGB representation the caller decoded
+  /// the captured photo into.
+  Future<List<double>?> computeEmbeddingFromRgb({
+    required int imageWidth,
+    required int imageHeight,
+    required Rect faceBoundingBox,
+    required List<int> Function(int x, int y) samplePixel,
+    double? leftEyeX,
+    double? leftEyeY,
+    double? rightEyeX,
+    double? rightEyeY,
+  }) async {
+    if (!isReady) return null;
+    final input = FacePreprocessor.prepareFromRgb(
+      width: imageWidth, height: imageHeight,
+      bbox: faceBoundingBox, samplePixel: samplePixel,
+      leftEyeX: leftEyeX, leftEyeY: leftEyeY,
+      rightEyeX: rightEyeX, rightEyeY: rightEyeY,
+    );
     if (input == null) return null;
     return _model.infer(input);
   }
@@ -516,6 +550,7 @@ class _PreprocessInput {
     required this.imageBytes, required this.imageWidth, required this.imageHeight,
     required this.bbox, required this.sensorOrientation,
     this.leftEyeX, this.leftEyeY, this.rightEyeX, this.rightEyeY,
+    this.coordinatesInSensorSpace = false,
   });
   final Uint8List imageBytes;
   final int imageWidth;
@@ -526,6 +561,7 @@ class _PreprocessInput {
   final double? leftEyeY;
   final double? rightEyeX;
   final double? rightEyeY;
+  final bool coordinatesInSensorSpace;
 }
 
 Float32List? _runPreprocess(_PreprocessInput inp) =>
@@ -535,4 +571,5 @@ Float32List? _runPreprocess(_PreprocessInput inp) =>
       sensorOrientation: inp.sensorOrientation,
       leftEyeX: inp.leftEyeX, leftEyeY: inp.leftEyeY,
       rightEyeX: inp.rightEyeX, rightEyeY: inp.rightEyeY,
+      coordinatesInSensorSpace: inp.coordinatesInSensorSpace,
     );

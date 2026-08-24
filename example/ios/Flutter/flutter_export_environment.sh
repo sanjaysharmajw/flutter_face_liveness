@@ -1,7 +1,8 @@
 #!/bin/sh
 # This is a generated file; do not edit or check into version control.
-export "FLUTTER_ROOT=/Users/sanjaysharma/Downloads/congragation/flutter"
-export "FLUTTER_APPLICATION_PATH=/Users/sanjaysharma/Desktop/flutter_face_liveness/example"
+export "FLUTTER_ROOT=/Users/sanjaysharma/Documents/Flutter/latest_flutter_sdk/flutter3.24.3"
+export "FLUTTER_APPLICATION_PATH=/Users/sanjaysharma/Desktop/Faveless/flutter_face_liveness/example"
+export "FLUTTER_FRAMEWORK_SWIFT_PACKAGE_PATH=/Users/sanjaysharma/Desktop/Faveless/flutter_face_liveness/example/ios/Flutter/ephemeral/Packages/.packages/FlutterFramework"
 export "COCOAPODS_PARALLEL_CODE_SIGN=true"
 export "FLUTTER_TARGET=lib/main.dart"
 export "FLUTTER_BUILD_DIR=build"

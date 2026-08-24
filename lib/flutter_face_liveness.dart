@@ -33,6 +33,7 @@ export 'src/models/face_data.dart';
 export 'src/models/face_mesh_data.dart';
 export 'src/models/detection_status.dart';
 export 'src/models/frame_quality.dart';
+export 'src/models/face_detector_backend.dart';
 
 // ML / security (useful for advanced integrations)
 export 'src/ml/anti_spoof_engine.dart' show AntiSpoofEngine, AntiSpoofResult;
@@ -45,4 +46,10 @@ export 'src/identity/face_identity_service.dart'
     show FaceIdentityService, FaceIdMode, FaceMatchOutcome, FaceMatchResult;
 export 'src/identity/face_model_downloader.dart'
     show FaceModelDownloader, FaceModelDownloadException;
+export 'src/identity/yolo_face_detector_service.dart'
+    show YoloFaceDetectorService, YoloFaceDetection;
+export 'src/identity/yolo_model_downloader.dart'
+    show YoloModelDownloader, YoloModelDownloadException;
+export 'src/identity/face_capture_service.dart'
+    show FaceCaptureService, FaceCaptureResult;
 export 'src/ml/face_detector_service.dart' show RawFrameData;

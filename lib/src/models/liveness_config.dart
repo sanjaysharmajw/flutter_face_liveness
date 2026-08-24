@@ -2,6 +2,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import '../identity/face_identity_service.dart' show FaceIdMode;
+import 'face_detector_backend.dart';
 
 /// Full configuration for the liveness verification session.
 ///
@@ -58,6 +59,10 @@ class LivenessConfig {
     this.faceIdSimilarityThreshold = 0.82,
     this.registrationDuplicateThreshold = 0.75,
     this.minEmbeddingQuality = 0.50,
+    this.faceDetectorBackend = FaceDetectorBackend.mlkit,
+    this.yoloModelUrl,
+    this.yoloConfidenceThreshold = 0.5,
+    this.yoloIouThreshold = 0.45,
 
     // ── UI ───────────────────────────────────────────────────────────────
     this.themeMode = ThemeMode.dark,
@@ -175,6 +180,21 @@ class LivenessConfig {
   /// low-light, motion blur, or partial face crops.
   final double minEmbeddingQuality;
 
+  /// Which detector supplies the face box + eye positions fed into the
+  /// identity/embedding pipeline. Liveness actions always use ML Kit
+  /// regardless of this setting (see [FaceDetectorBackend]).
+  final FaceDetectorBackend faceDetectorBackend;
+
+  /// Override URL for the YOLOv8n-face TFLite model. Falls back to
+  /// [YoloModelDownloader.bundledModelUrl] when null.
+  final String? yoloModelUrl;
+
+  /// Minimum detection confidence for a YOLOv8n-face box to be kept.
+  final double yoloConfidenceThreshold;
+
+  /// IoU threshold for YOLOv8n-face non-max suppression.
+  final double yoloIouThreshold;
+
   // ── UI ────────────────────────────────────────────────────────────────────
   final ThemeMode themeMode;
   final bool showDebugOverlay;
@@ -219,6 +239,10 @@ class LivenessConfig {
     double? faceIdSimilarityThreshold,
     double? registrationDuplicateThreshold,
     double? minEmbeddingQuality,
+    FaceDetectorBackend? faceDetectorBackend,
+    String? yoloModelUrl,
+    double? yoloConfidenceThreshold,
+    double? yoloIouThreshold,
     ThemeMode? themeMode,
     bool? showDebugOverlay,
   }) {
@@ -257,6 +281,10 @@ class LivenessConfig {
       registrationDuplicateThreshold:
           registrationDuplicateThreshold ?? this.registrationDuplicateThreshold,
       minEmbeddingQuality: minEmbeddingQuality ?? this.minEmbeddingQuality,
+      faceDetectorBackend: faceDetectorBackend ?? this.faceDetectorBackend,
+      yoloModelUrl: yoloModelUrl ?? this.yoloModelUrl,
+      yoloConfidenceThreshold: yoloConfidenceThreshold ?? this.yoloConfidenceThreshold,
+      yoloIouThreshold: yoloIouThreshold ?? this.yoloIouThreshold,
       themeMode: themeMode ?? this.themeMode,
       showDebugOverlay: showDebugOverlay ?? this.showDebugOverlay,
     );
