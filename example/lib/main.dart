@@ -412,6 +412,9 @@ class LivenessScreen extends StatelessWidget {
         enableBlurDetection: true,
         enableFaceId: enableFaceId,
         faceIdMode: faceIdMode,
+        // Stricter than the SDK default (0.82) to reduce false-accept risk
+        // between different people — see README's Face Identity section.
+        faceIdSimilarityThreshold: 0.86,
         enableTFLite: enableTFLite,
         enableVideoReplayDetection: enableVideoReplay,
         showDebugOverlay: true,

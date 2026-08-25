@@ -932,7 +932,7 @@ cd example
 flutter run
 ```
 
-Six challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face.
+Seven challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · With TFLite Anti-Spoof.
 
 **Testing replay detection:**
 1. Enable `showDebugOverlay: true` in the example config
@@ -947,7 +947,7 @@ See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
 Latest: **v3.3.0** — Optional YOLOv8n-face detector backend for the identity pipeline (`FaceDetectorBackend`), `FaceCaptureService` for photo-based enrollment/verification, both running on dedicated background isolates.
 
-Previous: **v3.2.0** — Accessory validation, faster action detection, camera initialization race condition fix, replay attack tuning guidance.
+Previous: **v3.2.0** — Faster action detection, camera initialization race condition fix, replay attack tuning guidance.
 
 ---
 
