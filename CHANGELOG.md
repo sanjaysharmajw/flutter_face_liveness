@@ -5,12 +5,21 @@
 - **YOLOv8n-face detection backend for face identity** — `FaceDetectorBackend` (`mlkit` default, `yolov8`) lets the identity/embedding pipeline use a YOLOv8n-face TFLite model instead of ML Kit's own landmarks for the face box + eye keypoints fed into `FaceEmbeddingModel`. Liveness actions (blink/smile/head-pose) always use ML Kit regardless of this setting, since only ML Kit exposes that classification output. Configured via `LivenessConfig.faceDetectorBackend`, `yoloModelUrl`, `yoloConfidenceThreshold`, `yoloIouThreshold`.
   - `YoloFaceDetectorService` / `YoloFaceDetection` — TFLite inference + letterbox preprocessing + NMS decode (standard Ultralytics raw pose-export layout: box + confidence + 5 keypoints).
   - `YoloModelDownloader` — same cache-on-first-use pattern as `FaceModelDownloader`/`TFLiteModelDownloader`.
-  - **Requires a manual one-time step**: export `yolov8n-face.pt` to `.tflite` and upload it as a release asset before this backend is usable — see `YoloModelDownloader.bundledModelUrl`. `mlkit` (default) needs no extra setup and is unaffected.
+  - `YoloModelDownloader.bundledModelUrl` already points to a hosted `yolov8n-face.tflite` release asset — works out of the box, no setup required. Override `LivenessConfig.yoloModelUrl` only if you want to swap in a custom model.
 
 - **`FaceCaptureService`** — enrollment/verification from a single captured photo (as opposed to a full live liveness session): decode → detect (either backend) → pre-capture quality gate (brightness/blur/face-size, distinct from `FaceIdentityService`'s post-hoc embedding-quality check) → eye-aligned crop → embed → match/register, reusing `FaceIdentityService`'s gallery so a person registered via live session or via photo capture is the same lookup. Returns `FaceCaptureResult` (either a `FaceMatchResult` or a pre-match rejection reason).
   - `FaceEmbeddingModel`/`FacePreprocessor` gained a static-RGB entry point (`FacePreprocessor.prepareFromRgb`, `FaceIdentityService.computeEmbeddingFromRgb`) so the same loaded model/gallery serve both the live-frame and captured-photo paths — no duplicate model instance.
 
 - **`image` package** now a direct dependency (decoding captured photos for `FaceCaptureService`).
+
+- **`LivenessConfig.enableBestFrontalCapture`** — automatically captures the most-frontal frame seen during a session (by `|yaw|+|pitch|`) and exposes it as `LivenessResult.bestFrontalImageBytes` (upright JPEG) on success, for apps that want a human-viewable photo of the user alongside the liveness/identity result (e.g. a KYC review screen) without a separate capture step. Independent of `enableFaceId` — shares the same internal frame-tracking at no extra cost when both are on, but works standalone. JPEG quality configurable via `bestFrontalJpegQuality` (default `85`).
+  - `encodeFrameToJpeg()` (`lib/src/ml/frame_encoder.dart`) — converts the raw NV21/BGRA frame to an upright JPEG (rotation-corrected via `LivenessConfig`'s existing sensor-orientation handling), reusing `FacePreprocessor.yuv2rgbNv21` rather than a third copy of the YUV conversion.
+
+### Bug Fixes
+
+- **Swift Package Manager build failure** — `ios/flutter_face_liveness/Package.swift` exported its library product as `flutter_face_liveness` (underscore). Flutter's auto-generated `FlutterGeneratedPluginSwiftPackage` requires plugin product names to be hyphenated (`flutter-face-liveness`) per the [Flutter SPM naming convention](https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-app-developers), so any app built with `flutter config --enable-swift-package-manager` failed with `product 'flutter-face-liveness' ... not found`. Fixed by renaming the library product (target name unchanged).
+
+- **`ConcurrentModificationError` on `_frontalFrames` in release builds** — when `enableFaceId: true`, `_onEngineComplete()` iterates `_frontalFrames` with a `for` loop that awaits per-frame embedding computation. Because `_processFrame()` had no guard against the engine already being complete, a camera frame arriving during that async window could still append to the same list mid-iteration, throwing `Concurrent modification during iteration`. Fixed by (1) short-circuiting `_processFrame()` once `_engine.isComplete` is true, and (2) iterating a `List.of(_frontalFrames)` snapshot as defense in depth.
 
 ## 3.2.0
 

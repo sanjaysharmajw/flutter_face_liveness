@@ -64,6 +64,10 @@ class LivenessConfig {
     this.yoloConfidenceThreshold = 0.5,
     this.yoloIouThreshold = 0.45,
 
+    // ── Best-frontal capture ────────────────────────────────────────────
+    this.enableBestFrontalCapture = false,
+    this.bestFrontalJpegQuality = 85,
+
     // ── UI ───────────────────────────────────────────────────────────────
     this.themeMode = ThemeMode.dark,
     this.showDebugOverlay = false,
@@ -195,6 +199,19 @@ class LivenessConfig {
   /// IoU threshold for YOLOv8n-face non-max suppression.
   final double yoloIouThreshold;
 
+  /// When true, tracks the most-frontal frame seen during the session (by
+  /// |yaw|+|pitch|) and exposes it as [LivenessResult.bestFrontalImageBytes]
+  /// (upright JPEG) on completion — a human-viewable capture (e.g. for a KYC
+  /// review screen) alongside the numeric liveness/identity results.
+  ///
+  /// Independent of [enableFaceId] — the same underlying frame tracking is
+  /// shared internally when both are on, at no extra cost, but this works
+  /// standalone without identity/embedding matching.
+  final bool enableBestFrontalCapture;
+
+  /// JPEG quality (0–100) for [LivenessResult.bestFrontalImageBytes].
+  final int bestFrontalJpegQuality;
+
   // ── UI ────────────────────────────────────────────────────────────────────
   final ThemeMode themeMode;
   final bool showDebugOverlay;
@@ -243,6 +260,8 @@ class LivenessConfig {
     String? yoloModelUrl,
     double? yoloConfidenceThreshold,
     double? yoloIouThreshold,
+    bool? enableBestFrontalCapture,
+    int? bestFrontalJpegQuality,
     ThemeMode? themeMode,
     bool? showDebugOverlay,
   }) {
@@ -285,6 +304,8 @@ class LivenessConfig {
       yoloModelUrl: yoloModelUrl ?? this.yoloModelUrl,
       yoloConfidenceThreshold: yoloConfidenceThreshold ?? this.yoloConfidenceThreshold,
       yoloIouThreshold: yoloIouThreshold ?? this.yoloIouThreshold,
+      enableBestFrontalCapture: enableBestFrontalCapture ?? this.enableBestFrontalCapture,
+      bestFrontalJpegQuality: bestFrontalJpegQuality ?? this.bestFrontalJpegQuality,
       themeMode: themeMode ?? this.themeMode,
       showDebugOverlay: showDebugOverlay ?? this.showDebugOverlay,
     );

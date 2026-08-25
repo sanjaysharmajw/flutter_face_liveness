@@ -207,6 +207,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         accentColor: _error,
                         onTap: () => _launchWithTFLite(context),
                       ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.photo_camera_front_rounded,
+                        title: 'Best-Frontal Capture',
+                        subtitle: 'Auto-captures an upright photo on success',
+                        accentColor: _cyan,
+                        onTap: () => _launchBestFrontalCapture(context),
+                      ),
                     ],
                   ),
                 ),
@@ -317,6 +325,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     )));
   }
 
+  Future<void> _launchBestFrontalCapture(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(const LivenessScreen(
+      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+      enableBestFrontalCapture: true,
+    )));
+  }
+
   void _showPermissionSheet(BuildContext ctx) {
     showModalBottomSheet(
       context: ctx,
@@ -392,12 +413,14 @@ class LivenessScreen extends StatelessWidget {
     this.faceIdMode = FaceIdMode.auto,
     this.enableTFLite = true,
     this.enableVideoReplay = false,
+    this.enableBestFrontalCapture = false,
   });
   final List<LivenessAction> actions;
   final bool enableFaceId;
   final FaceIdMode faceIdMode;
   final bool enableTFLite;
   final bool enableVideoReplay;
+  final bool enableBestFrontalCapture;
 
   @override
   Widget build(BuildContext context) {
@@ -417,6 +440,7 @@ class LivenessScreen extends StatelessWidget {
         faceIdSimilarityThreshold: 0.86,
         enableTFLite: enableTFLite,
         enableVideoReplayDetection: enableVideoReplay,
+        enableBestFrontalCapture: enableBestFrontalCapture,
         showDebugOverlay: true,
       ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
@@ -523,6 +547,12 @@ class _ResultScreenState extends State<ResultScreen>
                                   : FontWeight.w600,
                             ),
                           ),
+                          if (widget.result?.bestFrontalImageBytes != null) ...[
+                            const SizedBox(height: 24),
+                            _BestFrontalPreview(
+                              bytes: widget.result!.bestFrontalImageBytes!,
+                            ),
+                          ],
                           if (widget.result != null) ...[
                             const SizedBox(height: 28),
                             _StatsCard(result: widget.result!),
@@ -573,6 +603,29 @@ class _ResultBadge extends StatelessWidget {
         success ? Icons.verified_rounded : Icons.cancel_rounded,
         color: color,
         size: 62,
+      ),
+    );
+  }
+}
+
+class _BestFrontalPreview extends StatelessWidget {
+  const _BestFrontalPreview({required this.bytes});
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 140,
+      height: 140,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: _success.withValues(alpha: 0.4), width: 2),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 16, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: ClipOval(
+        child: Image.memory(bytes, fit: BoxFit.cover),
       ),
     );
   }

@@ -84,8 +84,9 @@ class FaceDetectorService {
 
   /// Process one camera frame.
   ///
-  /// Set [captureRawFrame] to `true` (when FaceId is enabled) to attach the
-  /// NV21 bytes to the result so the identity service can run the embedding.
+  /// Set [captureRawFrame] to `true` to attach the raw NV21/BGRA bytes to the
+  /// result — needed by Face ID (embedding), TFLite anti-spoof, video-replay
+  /// detection, and best-frontal capture, any of which may request it.
   ///
   /// Returns an empty result on error or after dispose.
   Future<FaceDetectionResult> processCameraImage(

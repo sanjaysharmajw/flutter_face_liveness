@@ -10,7 +10,7 @@
 Production-ready AI-powered Flutter SDK for **real-time face liveness detection, replay attack prevention, and persistent face identity** — powered by Google ML Kit, TensorFlow Lite, and an optional YOLOv8n-face detector backend. All processing runs **entirely on-device** with zero server calls (except one-time model downloads).
 
 > ### 🆕 New in v3.3.0 — YOLOv8n-face detector backend
-> Select `FaceDetectorBackend.yolov8` to run a YOLOv8n-face TFLite model — on its own background isolate, never blocking the camera — as an alternative to ML Kit for the identity/embedding pipeline. Works out of the box, no setup required. Also new: [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying a face from a single captured photo, no liveness session needed.
+> Select `FaceDetectorBackend.yolov8` to run a YOLOv8n-face TFLite model — on its own background isolate, never blocking the camera — as an alternative to ML Kit for the identity/embedding pipeline. Works out of the box, no setup required. Also new: [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying a face from a single captured photo, no liveness session needed; and `enableBestFrontalCapture` to auto-capture an upright JPEG of the user's best-angle frame alongside the liveness result.
 >
 > → [Face Detector Backends (ML Kit / YOLOv8)](#face-detector-backends-ml-kit--yolov8)
 
@@ -26,6 +26,7 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 - [Face Identity (Face ID)](#face-identity-face-id)
 - [Face Detector Backends (ML Kit / YOLOv8)](#face-detector-backends-ml-kit--yolov8)
 - [Face Capture — Photo Enrollment & Verification](#face-capture--photo-enrollment--verification)
+- [Best-Frontal Capture](#best-frontal-capture)
 - [LivenessConfig Reference](#livenessconfig-reference)
 - [Liveness Actions](#liveness-actions)
 - [LivenessResult Fields](#livenessresult-fields)
@@ -49,6 +50,7 @@ Production-ready AI-powered Flutter SDK for **real-time face liveness detection,
 | **Face ID** | Same face → always same ID, across sessions and restarts. Powered by FaceNet TFLite (auto-downloaded, ~23 MB) |
 | **Face Detector Backends** | `FaceDetectorBackend.mlkit` *(default)* or `.yolov8` — select which model supplies the face box/keypoints feeding the identity pipeline. Liveness actions always use ML Kit either way |
 | **Photo-Based Enrollment** | `FaceCaptureService` — enroll/verify from a single captured photo (no liveness challenge) using the same gallery and models as the live session flow |
+| **Best-Frontal Capture** | `enableBestFrontalCapture: true` — auto-captures the most-frontal frame of the session as an upright JPEG (`LivenessResult.bestFrontalImageBytes`), e.g. for a KYC review screen |
 | **New/Returning** | `isFaceIdNew` flag — first-time or returning face |
 | **Anti-Spoof** | 9-signal composite engine — eye variance, geometry, pose, micro-motion, quality, tracking, brightness variance, motion jitter |
 | **8-Signal Replay Detection** | Five new pure-Dart signals (S5–S8) run alongside MiniFASNet. Final score = min of all signals — must defeat every layer simultaneously |
@@ -269,6 +271,10 @@ dependency_overrides:
       url: https://github.com/tensorflow/flutter-tflite.git
       ref: main
 ```
+
+### 5. iOS Swift Package Manager (optional)
+
+If your app has `flutter config --enable-swift-package-manager` enabled, this plugin's `Package.swift` product name follows Flutter's required hyphenated naming convention (`flutter-face-liveness`) — no extra setup needed, just make sure you're on `v3.3.0`+ (earlier versions used an underscored product name that fails SPM resolution with `product 'flutter-face-liveness' ... not found`).
 
 ---
 
@@ -493,6 +499,36 @@ Captured photos carry an EXIF orientation tag rather than storing pixels upright
 
 ---
 
+## Best-Frontal Capture
+
+For a live liveness session, `enableBestFrontalCapture` automatically tracks the most-frontal frame seen (by `|yaw|+|pitch|`) and returns it as an upright JPEG on success — useful when you want a human-viewable photo of the user (e.g. for a KYC agent review screen) without asking them to pose for a separate picture.
+
+```dart
+FlutterFaceLiveness(
+  actions: [LivenessAction.blink, LivenessAction.turnLeft],
+  config: LivenessConfig(
+    enableBestFrontalCapture: true,
+    bestFrontalJpegQuality: 85,
+  ),
+  onSuccess: (result) {
+    final jpegBytes = result.bestFrontalImageBytes; // Uint8List?
+    if (jpegBytes != null) {
+      File('${dir.path}/capture.jpg').writeAsBytesSync(jpegBytes);
+    }
+  },
+  onFailed: (reason) => print('Failed: $reason'),
+)
+```
+
+- Independent of `enableFaceId` — works standalone, or shares the same frame-tracking at no extra cost when both are enabled together.
+- Only populated on a **successful** session — a failed/timed-out session has no capture attached.
+- Rotation-corrected to upright orientation regardless of device/camera sensor orientation.
+- JPEG encoding runs on a background isolate (`Isolate.run`) — never blocks the UI thread, even for a full-resolution frame.
+
+See the example app's **"Best-Frontal Capture"** preset for a working demo (result screen shows the captured photo).
+
+---
+
 ## LivenessConfig Reference
 
 ```dart
@@ -535,6 +571,8 @@ LivenessConfig({
   String?    yoloModelUrl                      = null,
   double     yoloConfidenceThreshold           = 0.5,
   double     yoloIouThreshold                  = 0.45,
+  bool       enableBestFrontalCapture          = false,
+  int        bestFrontalJpegQuality            = 85,
 
   // TFLite anti-spoof (FaceAntiSpoofing, 3.9 MB — auto-download)
   bool    enableTFLite            = false,
@@ -585,6 +623,8 @@ LivenessConfig({
 | `yoloModelUrl` | `String?` | `null` | Override download URL for the YOLOv8n-face model. `null` = `YoloModelDownloader.bundledModelUrl` |
 | `yoloConfidenceThreshold` | `double` | `0.5` | Minimum detection confidence for a YOLOv8n-face box to be kept |
 | `yoloIouThreshold` | `double` | `0.45` | IoU threshold for YOLOv8n-face non-max suppression |
+| `enableBestFrontalCapture` | `bool` | `false` | Auto-capture the most-frontal frame as an upright JPEG on success — see `LivenessResult.bestFrontalImageBytes` |
+| `bestFrontalJpegQuality` | `int` | `85` | JPEG quality (0–100) for the best-frontal capture |
 | `enableTFLite` | `bool` | `false` | FaceAntiSpoofing model (auto-downloads 3.9 MB, cached) |
 | `tfliteModelPath` | `String?` | `null` | Override: asset key or absolute path |
 | `tfliteModelUrl` | `String?` | `null` | Override: custom download URL |
@@ -654,6 +694,9 @@ class LivenessResult {
   final bool?   isFaceIdNew;            // true = first-time, false = recognised
   final bool?   faceAlreadyRegistered;  // true when registrationOnly + face already exists
   final double? faceMatchScore;         // cosine similarity from gallery search (0.0–1.0)
+
+  // Best-Frontal Capture — non-null when enableBestFrontalCapture: true and isSuccess
+  final Uint8List? bestFrontalImageBytes; // upright JPEG of the most-frontal frame
 }
 ```
 
@@ -932,7 +975,7 @@ cd example
 flutter run
 ```
 
-Seven challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · With TFLite Anti-Spoof.
+Eight challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · With TFLite Anti-Spoof · Best-Frontal Capture.
 
 **Testing replay detection:**
 1. Enable `showDebugOverlay: true` in the example config

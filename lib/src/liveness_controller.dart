@@ -1,5 +1,6 @@
 import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
+import 'dart:isolate' show Isolate;
 import 'dart:math' show min;
 import 'dart:ui' show Rect;
 
@@ -18,6 +19,7 @@ import 'ml/face_detector_service.dart';
 import 'ml/tflite_service.dart';
 import 'ml/tflite_model_downloader.dart';
 import 'ml/video_replay_model_downloader.dart';
+import 'ml/frame_encoder.dart';
 import 'liveness/liveness_engine.dart';
 import 'identity/face_identity_service.dart';
 import 'identity/yolo_face_detector_service.dart';
@@ -363,12 +365,19 @@ class LivenessController extends ChangeNotifier {
     CameraDescription camera,
   ) async {
     if (_isDisposed || !_isInitialized) return;
+    // Once the engine has completed, _onEngineComplete() may still be
+    // asynchronously iterating _frontalFrames (computing embeddings per
+    // frame). Frames arriving during that window must not mutate the same
+    // list it's iterating, or Dart throws ConcurrentModificationError —
+    // stop processing new frames as soon as the session is done.
+    if (_engine?.isComplete ?? false) return;
 
     final result = await _faceDetector.processCameraImage(
       image,
       camera.sensorOrientation,
       camera.lensDirection,
-      captureRawFrame: _config.enableFaceId || _config.enableTFLite || _config.enableVideoReplayDetection,
+      captureRawFrame: _config.enableFaceId || _config.enableTFLite ||
+          _config.enableVideoReplayDetection || _config.enableBestFrontalCapture,
     );
 
     if (_isDisposed) return;
@@ -378,23 +387,30 @@ class LivenessController extends ChangeNotifier {
     if (result.rawFrame  != null) _lastRawFrame = result.rawFrame;
     if (result.meshData  != null) _lastMeshData = result.meshData;
 
-    // Collect frontal frames for Face ID — multiple frames are averaged at
-    // session end for a stable embedding (single-frame embeddings are noisy).
-    if (_config.enableFaceId && _currentFace != null && result.rawFrame != null) {
+    // Track the best (most-frontal) frame for LivenessResult.bestFrontalImageBytes,
+    // and — when Face ID is on — collect frontal frames for identity, averaged
+    // at session end for a stable embedding (single-frame embeddings are noisy).
+    if ((_config.enableFaceId || _config.enableBestFrontalCapture) &&
+        _currentFace != null && result.rawFrame != null) {
       final frontality = _currentFace!.headEulerAngleY.abs() + _currentFace!.headEulerAngleX.abs();
       final isCandidateForBest = frontality < _bestFrontalScore;
-      final isCandidateForCollection =
+      // Multi-sample collection is a Face ID concern only (averaging embeddings) —
+      // best-frontal capture alone only needs the single best frame below.
+      final isCandidateForCollection = _config.enableFaceId &&
           frontality < _frontalAngleLimit && _frontalFrames.length < _maxFrontalFrames;
 
       // When the yolov8 backend is selected, run it on this frame to get the
       // box/eye-points that will feed the embedding instead of ML Kit's own
       // landmarks (ML Kit keeps running above regardless, for liveness
-      // actions). Only invoked for frames that could actually be used.
+      // actions). Only invoked for frames that could actually be used, and
+      // only when Face ID is on (YOLO's keypoints aren't used by best-frontal
+      // capture, which just needs the raw frame + ML Kit's angle for scoring).
       // Runs on YoloFaceDetectorService's own background isolate — awaiting
       // it here suspends only this async call, it never blocks camera-frame
       // delivery (same guarantee as the _tflite/_videoReplay calls above).
       YoloFaceDetection? yoloFace;
-      if ((isCandidateForBest || isCandidateForCollection) &&
+      if (_config.enableFaceId &&
+          (isCandidateForBest || isCandidateForCollection) &&
           _config.faceDetectorBackend == FaceDetectorBackend.yolov8 &&
           _yoloDetector != null) {
         final detections = await _yoloDetector!.detectFromRawFrame(
@@ -687,9 +703,13 @@ class LivenessController extends ChangeNotifier {
     if (result.isSuccess && _faceIdentity != null) {
       debugPrint('[FaceId] frontalFrames=${_frontalFrames.length}  bestScore=${_bestFrontalScore.toStringAsFixed(1)}°');
 
-      // Determine frames to process: collected frontal frames, or fallback to best single
+      // Determine frames to process: collected frontal frames, or fallback to best single.
+      // Snapshot via List.of() — this loop awaits per-frame below, and iterating
+      // the live _frontalFrames list directly risks ConcurrentModificationError
+      // if it's ever mutated during that window (see the isComplete guard in
+      // _processFrame, which is the primary defense against that).
       final framesToProcess = _frontalFrames.isNotEmpty
-          ? _frontalFrames
+          ? List.of(_frontalFrames)
           : () {
               final raw  = _bestFrontalFrame ?? _lastRawFrame;
               final face = _bestFrontalFace  ?? _currentFace;
@@ -785,6 +805,25 @@ class LivenessController extends ChangeNotifier {
       onFailed('Deepfake detected$scoreStr');
       notifyListeners();
       return;
+    }
+
+    // Encode the best-frontal frame to JPEG for LivenessResult.bestFrontalImageBytes.
+    // Only on success — a failed/aborted session has no use for the capture.
+    // Runs on a background isolate (Isolate.run) — a full-resolution frame is
+    // ~2M pixels of manual YUV/BGRA->RGB conversion plus JPEG encoding, which
+    // would otherwise block the UI isolate right as notifyListeners()/onSuccess
+    // fire here. Same reasoning as compute() elsewhere (frame_processor.dart,
+    // face_identity_service.dart) for comparable per-pixel work.
+    if (finalResult.isSuccess &&
+        _config.enableBestFrontalCapture &&
+        _bestFrontalFrame != null) {
+      final frame   = _bestFrontalFrame!;
+      final quality = _config.bestFrontalJpegQuality;
+      final jpeg = await Isolate.run(() => encodeFrameToJpeg(frame, quality: quality));
+      if (_isDisposed) return;
+      if (jpeg != null) {
+        finalResult = finalResult.withBestFrontalImage(jpeg);
+      }
     }
 
     if (finalResult.isSuccess) {

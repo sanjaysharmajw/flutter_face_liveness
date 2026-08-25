@@ -7,7 +7,7 @@ let package = Package(
         .iOS("13.0"),
     ],
     products: [
-        .library(name: "flutter_face_liveness", targets: ["flutter_face_liveness"])
+        .library(name: "flutter-face-liveness", targets: ["flutter_face_liveness"])
     ],
     targets: [
         .target(
