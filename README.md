@@ -998,7 +998,7 @@ cd example
 flutter run
 ```
 
-Eight challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · With TFLite Anti-Spoof · Best-Frontal Capture.
+Nine challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · Verify Face — Head Turn Only · With TFLite Anti-Spoof · Best-Frontal Capture.
 
 Two home-screen toggles apply to every preset:
 - **Accurate / Fast Detection** — `LivenessConfig.faceDetectorPerformanceMode`

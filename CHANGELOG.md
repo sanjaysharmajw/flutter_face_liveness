@@ -4,6 +4,8 @@
 
 - **Example app: `faceDetectorBackend` toggle** — `LivenessConfig.faceDetectorBackend` (ML Kit / YOLOv8n-face) was previously only settable in code with no example-app UI, so it always silently used the `mlkit` default. Added a home-screen toggle (alongside the existing performance-mode toggle) so both backends can be compared live, applied to every Face ID preset.
 
+- **Example app: "Verify Face — Head Turn Only" preset** — demonstrates that `LivenessConfig.actions` fully controls the challenge set with zero SDK changes required: `FaceIdMode.verificationOnly` using only `[LivenessAction.turnLeft, LivenessAction.turnRight]`, no blink. A reminder that trimming which actions are *required* is an app-level config choice — see [Liveness Actions](#liveness-actions) — as opposed to removing detector code from the SDK itself, which would also weaken the anti-spoof/replay-detection signals that read eye/smile data independently of the requested action list (`AntiSpoofEngine`, `ReplayAnalyzer`, `FaceGeometryAnalyzer`).
+
 ### Bug Fixes
 
 - **Blink/turn/smile actions slow or not registering with `faceDetectorBackend: yolov8`** — two compounding issues, both in `_processFrame()`:

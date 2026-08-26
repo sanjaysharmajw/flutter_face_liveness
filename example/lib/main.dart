@@ -230,6 +230,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 14),
                       _ChallengeCard(
+                        icon: Icons.swap_horiz_rounded,
+                        title: 'Verify Face — Head Turn Only',
+                        subtitle: 'Login-only · Turn Left + Turn Right, no blink',
+                        accentColor: _purple,
+                        onTap: () => _launchVerifyFaceHeadTurn(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
                         icon: Icons.psychology_outlined,
                         title: 'With TFLite Anti-Spoof',
                         subtitle: 'TFLite anti-spoof + video replay detection',
@@ -359,6 +367,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
     await Navigator.of(ctx).push(_fade(LivenessScreen(
       actions: const [LivenessAction.blink, LivenessAction.turnLeft],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.verificationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
+  }
+
+  /// Same as [_launchVerifyFace] (login-only, never registers unknown faces)
+  /// but with only the two head-turn actions as the challenge — no blink.
+  Future<void> _launchVerifyFaceHeadTurn(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.turnLeft, LivenessAction.turnRight],
       enableFaceId: true,
       faceIdMode: FaceIdMode.verificationOnly,
       performanceMode: _performanceMode,
