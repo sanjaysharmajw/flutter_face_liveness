@@ -1,6 +1,6 @@
 # flutter_face_liveness
 
-[![pub version](https://img.shields.io/badge/pub-3.3.0-blue)](https://pub.dev/packages/flutter_face_liveness)
+[![pub version](https://img.shields.io/badge/pub-3.4.0-blue)](https://pub.dev/packages/flutter_face_liveness)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-☕-yellow)](https://buymeacoffee.com/sanjaysharmajw)
@@ -9,8 +9,10 @@
 
 Production-ready AI-powered Flutter SDK for **real-time face liveness detection, replay attack prevention, and persistent face identity** — powered by Google ML Kit, TensorFlow Lite, and an optional YOLOv8n-face detector backend. All processing runs **entirely on-device** with zero server calls (except one-time model downloads).
 
-> ### 🆕 New in v3.3.0 — YOLOv8n-face detector backend
-> Select `FaceDetectorBackend.yolov8` to run a YOLOv8n-face TFLite model — on its own background isolate, never blocking the camera — as an alternative to ML Kit for the identity/embedding pipeline. Works out of the box, no setup required. Also new: [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying a face from a single captured photo, no liveness session needed; and `enableBestFrontalCapture` to auto-capture an upright JPEG of the user's best-angle frame alongside the liveness result.
+> ### 🆕 New in v3.4.0 — configurable detection accuracy, auto-capture, and fixes
+> `LivenessConfig.faceDetectorPerformanceMode` (default `.accurate`) improves face tracking through moderate turn/look angles; `enableBestFrontalCapture` auto-captures an upright JPEG of the user's best-angle frame alongside the liveness result. Also fixes an iOS Swift Package Manager build failure and a release-build `ConcurrentModificationError`. See [Best-Frontal Capture](#best-frontal-capture) and the [Changelog](#changelog).
+>
+> **v3.3.0** added `FaceDetectorBackend.yolov8` (YOLOv8n-face TFLite, on its own background isolate) as an alternative to ML Kit for the identity/embedding pipeline, and [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying from a single captured photo.
 >
 > → [Face Detector Backends (ML Kit / YOLOv8)](#face-detector-backends-ml-kit--yolov8)
 
@@ -224,7 +226,7 @@ FlutterFaceLiveness(
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^3.3.0
+  flutter_face_liveness: ^3.4.0
 ```
 
 ### 2. Platform permissions
@@ -274,7 +276,7 @@ dependency_overrides:
 
 ### 5. iOS Swift Package Manager (optional)
 
-If your app has `flutter config --enable-swift-package-manager` enabled, this plugin's `Package.swift` product name follows Flutter's required hyphenated naming convention (`flutter-face-liveness`) — no extra setup needed, just make sure you're on `v3.3.0`+ (earlier versions used an underscored product name that fails SPM resolution with `product 'flutter-face-liveness' ... not found`).
+If your app has `flutter config --enable-swift-package-manager` enabled, this plugin's `Package.swift` product name follows Flutter's required hyphenated naming convention (`flutter-face-liveness`) — no extra setup needed, just make sure you're on `v3.4.0`+ (earlier versions used an underscored product name that fails SPM resolution with `product 'flutter-face-liveness' ... not found`).
 
 ---
 
@@ -540,6 +542,7 @@ LivenessConfig({
   // Camera
   ResolutionPreset cameraResolution = ResolutionPreset.high,
   int    targetFps         = 20,
+  FaceDetectorMode faceDetectorPerformanceMode = FaceDetectorMode.accurate,
 
   // Anti-spoof (heuristic, 9 signals)
   bool   enableAntiSpoof      = true,
@@ -602,6 +605,7 @@ LivenessConfig({
 | `randomizeActions` | `bool` | `true` | Fisher-Yates shuffle per session |
 | `cameraResolution` | `ResolutionPreset` | `high` | `medium` reduces CPU on low-end devices |
 | `targetFps` | `int` | `20` | Frame processing rate (1–30 fps) |
+| `faceDetectorPerformanceMode` | `FaceDetectorMode` | `accurate` | ML Kit precision/speed trade-off — `.accurate` tracks moderate off-angle turns better, `.fast` is lower-latency. See [Liveness Actions](#liveness-actions) |
 | `enableAntiSpoof` | `bool` | `true` | 9-signal composite heuristic |
 | `antiSpoofThreshold` | `double` | `0.45` | Minimum composite score to pass |
 | `enableBrightnessCheck` | `bool` | `true` | Block too-dark or overexposed frames |
@@ -651,6 +655,8 @@ LivenessConfig({
 | Look Down | `LivenessAction.lookDown` | Pitch < −12° held for ≥ 50 ms |
 | Smile | `LivenessAction.smile` | Smile probability > 0.72 |
 | Open Mouth | `LivenessAction.openMouth` | Bbox height > 5% above 6-frame baseline **OR** smile probability > 0.65 (teeth visible), held 2 frames |
+
+> **Off-angle detection**: `LivenessConfig.faceDetectorPerformanceMode` defaults to `FaceDetectorMode.accurate`, which trades some per-frame latency for better tracking through moderate turn-left/turn-right/look-up/down angles (see [Performance](#performance) for the trade-off) — set it to `FaceDetectorMode.fast` for lower latency if your target devices need it. Neither mode removes ML Kit's fundamental angle ceiling — very steep/near-profile angles can still lose tracking entirely either way.
 
 ### Recommended combinations
 
@@ -879,8 +885,8 @@ FaceCaptureService (standalone — photo, not a live session)
 
 | Metric | Value |
 |--------|-------|
-| Per-frame latency — mid-range Android | 40–65 ms |
-| Per-frame latency — iPhone 12+ | 20–40 ms |
+| Per-frame latency — mid-range Android | 40–65 ms (measured under ML Kit `FaceDetectorMode.fast` — the current default is `.accurate` for better off-angle detection, see [Liveness Actions](#liveness-actions); not yet re-benchmarked, expect somewhat higher) |
+| Per-frame latency — iPhone 12+ | 20–40 ms (same caveat) |
 | S5–S8 signal computation (pure Dart) | < 2 ms/frame |
 | OpticalFlow 32×32 block-MAD | ~0.5 ms/frame |
 | FaceNet inference (warm) | 30–50 ms |
@@ -988,9 +994,9 @@ Eight challenge presets: Standard · Extended · Full · Face ID Auto · Registe
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
-Latest: **v3.3.0** — Optional YOLOv8n-face detector backend for the identity pipeline (`FaceDetectorBackend`), `FaceCaptureService` for photo-based enrollment/verification, both running on dedicated background isolates.
+Latest: **v3.4.0** — Configurable `faceDetectorPerformanceMode` (default `.accurate`), `enableBestFrontalCapture` auto-photo capture, iOS SPM build fix, release-build `ConcurrentModificationError` fix.
 
-Previous: **v3.2.0** — Faster action detection, camera initialization race condition fix, replay attack tuning guidance.
+Previous: **v3.3.0** — Optional YOLOv8n-face detector backend for the identity pipeline (`FaceDetectorBackend`), `FaceCaptureService` for photo-based enrollment/verification, both running on dedicated background isolates.
 
 ---
 

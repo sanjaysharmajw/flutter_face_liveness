@@ -1,3 +1,24 @@
+## 3.4.0
+
+### New Features
+
+- **`LivenessConfig.faceDetectorPerformanceMode`** — ML Kit precision/speed trade-off is now configurable (was hardcoded). Default switched from `FaceDetectorMode.fast` to `.accurate`, which improves face tracking through moderate off-angle head positions (turn-left/right, look-up/down), where `.fast` was more prone to losing the face mid-turn before an action registered — set it back to `.fast` for lower per-frame latency if your target devices need it. Trade-off not yet re-benchmarked (see README Performance table). Does not extend ML Kit's fundamental angle ceiling; very steep/near-profile angles can still lose tracking either way. `FaceDetectorMode` is now exported from the package. Demoed in the example app via a new toggle on the home screen.
+
+- **`LivenessConfig.enableBestFrontalCapture`** — automatically captures the most-frontal frame seen during a session (by `|yaw|+|pitch|`) and exposes it as `LivenessResult.bestFrontalImageBytes` (upright JPEG) on success, for apps that want a human-viewable photo of the user alongside the liveness/identity result (e.g. a KYC review screen) without a separate capture step. Independent of `enableFaceId` — shares the same internal frame-tracking at no extra cost when both are on, but works standalone. JPEG quality configurable via `bestFrontalJpegQuality` (default `85`).
+  - `encodeFrameToJpeg()` (`lib/src/ml/frame_encoder.dart`) — converts the raw NV21/BGRA frame to an upright JPEG (rotation-corrected via `LivenessConfig`'s existing sensor-orientation handling), reusing `FacePreprocessor.yuv2rgbNv21` rather than a third copy of the YUV conversion. Runs on a background isolate (`Isolate.run`) so a full-resolution encode never blocks the UI thread.
+
+### Bug Fixes
+
+- **Swift Package Manager build failure** — `ios/flutter_face_liveness/Package.swift` exported its library product as `flutter_face_liveness` (underscore). Flutter's auto-generated `FlutterGeneratedPluginSwiftPackage` requires plugin product names to be hyphenated (`flutter-face-liveness`) per the [Flutter SPM naming convention](https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-app-developers), so any app built with `flutter config --enable-swift-package-manager` failed with `product 'flutter-face-liveness' ... not found`. Fixed by renaming the library product (target name unchanged).
+
+- **`ConcurrentModificationError` on `_frontalFrames` in release builds** — when `enableFaceId: true`, `_onEngineComplete()` iterates `_frontalFrames` with a `for` loop that awaits per-frame embedding computation. Because `_processFrame()` had no guard against the engine already being complete, a camera frame arriving during that async window could still append to the same list mid-iteration, throwing `Concurrent modification during iteration`. Fixed by (1) short-circuiting `_processFrame()` once `_engine.isComplete` is true, and (2) iterating a `List.of(_frontalFrames)` snapshot as defense in depth.
+
+### Dependencies
+
+- **Widened outdated constraints** flagged by pub.dev's dependency-freshness check: `google_mlkit_face_detection` `^0.13.2` → `^0.14.0`, `google_mlkit_face_mesh_detection` `^0.4.2` → `^0.5.0`. No breaking API usage found in this codebase after the upgrade — `flutter analyze` clean on both the package and example app.
+  - Capped at these versions deliberately, not the latest (`0.15.1`/`0.6.1`): those require Dart SDK `^3.12.0`, which broke resolution for anyone on an older Flutter/Dart install (reported: Dart 3.10.4). `0.14.0`/`0.5.0` need only `>=3.8.0 <4.0.0`, matching this package's own broad `sdk: ">=3.0.0 <4.0.0"` declaration. Revisit once `^3.12.0` is a safe minimum to require.
+  - **`permission_handler` left at `^12.0.1`** (not bumped to `^13.0.1`): the newer version pulls in `permission_handler_android 14.0.0`, whose `build.gradle.kts` uses a Kotlin Gradle Plugin 2.0+-only DSL (`compilerOptions { jvmTarget = ... }`) that failed to compile against this project's configured Kotlin toolchain (reported: `Unresolved reference: compilerOptions`). Revisit once the project's Kotlin/AGP versions are updated to match.
+
 ## 3.3.0
 
 ### New Features
@@ -11,15 +32,6 @@
   - `FaceEmbeddingModel`/`FacePreprocessor` gained a static-RGB entry point (`FacePreprocessor.prepareFromRgb`, `FaceIdentityService.computeEmbeddingFromRgb`) so the same loaded model/gallery serve both the live-frame and captured-photo paths — no duplicate model instance.
 
 - **`image` package** now a direct dependency (decoding captured photos for `FaceCaptureService`).
-
-- **`LivenessConfig.enableBestFrontalCapture`** — automatically captures the most-frontal frame seen during a session (by `|yaw|+|pitch|`) and exposes it as `LivenessResult.bestFrontalImageBytes` (upright JPEG) on success, for apps that want a human-viewable photo of the user alongside the liveness/identity result (e.g. a KYC review screen) without a separate capture step. Independent of `enableFaceId` — shares the same internal frame-tracking at no extra cost when both are on, but works standalone. JPEG quality configurable via `bestFrontalJpegQuality` (default `85`).
-  - `encodeFrameToJpeg()` (`lib/src/ml/frame_encoder.dart`) — converts the raw NV21/BGRA frame to an upright JPEG (rotation-corrected via `LivenessConfig`'s existing sensor-orientation handling), reusing `FacePreprocessor.yuv2rgbNv21` rather than a third copy of the YUV conversion.
-
-### Bug Fixes
-
-- **Swift Package Manager build failure** — `ios/flutter_face_liveness/Package.swift` exported its library product as `flutter_face_liveness` (underscore). Flutter's auto-generated `FlutterGeneratedPluginSwiftPackage` requires plugin product names to be hyphenated (`flutter-face-liveness`) per the [Flutter SPM naming convention](https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-app-developers), so any app built with `flutter config --enable-swift-package-manager` failed with `product 'flutter-face-liveness' ... not found`. Fixed by renaming the library product (target name unchanged).
-
-- **`ConcurrentModificationError` on `_frontalFrames` in release builds** — when `enableFaceId: true`, `_onEngineComplete()` iterates `_frontalFrames` with a `for` loop that awaits per-frame embedding computation. Because `_processFrame()` had no guard against the engine already being complete, a camera frame arriving during that async window could still append to the same list mid-iteration, throwing `Concurrent modification during iteration`. Fixed by (1) short-circuiting `_processFrame()` once `_engine.isComplete` is true, and (2) iterating a `List.of(_frontalFrames)` snapshot as defense in depth.
 
 ## 3.2.0
 

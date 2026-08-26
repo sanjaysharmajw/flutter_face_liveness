@@ -34,6 +34,8 @@ export 'src/models/face_mesh_data.dart';
 export 'src/models/detection_status.dart';
 export 'src/models/frame_quality.dart';
 export 'src/models/face_detector_backend.dart';
+export 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart'
+    show FaceDetectorMode;
 
 // ML / security (useful for advanced integrations)
 export 'src/ml/anti_spoof_engine.dart' show AntiSpoofEngine, AntiSpoofResult;

@@ -1,5 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart' show FaceDetectorMode;
 
 import '../identity/face_identity_service.dart' show FaceIdMode;
 import 'face_detector_backend.dart';
@@ -17,6 +18,7 @@ class LivenessConfig {
     // ── Camera ───────────────────────────────────────────────────────────
     this.cameraResolution = ResolutionPreset.high,
     this.targetFps = 20,
+    this.faceDetectorPerformanceMode = FaceDetectorMode.accurate,
 
     // ── Anti-spoof ───────────────────────────────────────────────────────
     this.enableAntiSpoof = true,
@@ -85,6 +87,16 @@ class LivenessConfig {
 
   /// Target frame processing rate (1–30). Higher = more responsive but more CPU.
   final int targetFps;
+
+  /// ML Kit face detector precision/speed trade-off.
+  ///
+  /// [FaceDetectorMode.accurate] (default) trades some per-frame latency for
+  /// better tracking through moderate off-angle head positions — turn-left/
+  /// right and look-up/down actions are less likely to lose the face mid-turn.
+  /// [FaceDetectorMode.fast] is lower-latency but more prone to losing
+  /// tracking at the same angles. Neither changes ML Kit's fundamental angle
+  /// ceiling — very steep/near-profile angles can still lose tracking either way.
+  final FaceDetectorMode faceDetectorPerformanceMode;
 
   // ── Anti-spoof ───────────────────────────────────────────────────────────
   /// Enable heuristic + ML-based anti-spoof validation.
@@ -229,6 +241,7 @@ class LivenessConfig {
     bool? randomizeActions,
     ResolutionPreset? cameraResolution,
     int? targetFps,
+    FaceDetectorMode? faceDetectorPerformanceMode,
     bool? enableAntiSpoof,
     double? antiSpoofThreshold,
     bool? enableBrightnessCheck,
@@ -270,6 +283,7 @@ class LivenessConfig {
       randomizeActions: randomizeActions ?? this.randomizeActions,
       cameraResolution: cameraResolution ?? this.cameraResolution,
       targetFps: targetFps ?? this.targetFps,
+      faceDetectorPerformanceMode: faceDetectorPerformanceMode ?? this.faceDetectorPerformanceMode,
       enableAntiSpoof: enableAntiSpoof ?? this.enableAntiSpoof,
       antiSpoofThreshold: antiSpoofThreshold ?? this.antiSpoofThreshold,
       enableBrightnessCheck: enableBrightnessCheck ?? this.enableBrightnessCheck,

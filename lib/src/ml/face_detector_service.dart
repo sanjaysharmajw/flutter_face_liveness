@@ -65,7 +65,10 @@ class FaceDetectorService {
   int  _frameCount  = 0;
   FaceMeshData? _lastMeshData;
 
-  FaceDetectorService({bool enableFaceMesh = false}) {
+  FaceDetectorService({
+    bool enableFaceMesh = false,
+    FaceDetectorMode performanceMode = FaceDetectorMode.accurate,
+  }) {
     _detector = FaceDetector(
       options: FaceDetectorOptions(
         enableClassification: true,
@@ -73,7 +76,9 @@ class FaceDetectorService {
         enableLandmarks: true,  // needed for eye/nose positions in FaceGeometryAnalyzer
         enableContours: false,
         minFaceSize: 0.15,
-        performanceMode: FaceDetectorMode.fast,
+        // .accurate (default) trades some latency for better tracking through
+        // moderate off-angle head positions — see LivenessConfig.faceDetectorPerformanceMode.
+        performanceMode: performanceMode,
       ),
     );
     if (enableFaceMesh) {

@@ -40,7 +40,10 @@ class LivenessController extends ChangeNotifier {
     LivenessConfig config = const LivenessConfig(),
   })  : _actions = actions,
         _config  = config {
-    _faceDetector = FaceDetectorService(enableFaceMesh: config.enableFaceMesh);
+    _faceDetector = FaceDetectorService(
+      enableFaceMesh: config.enableFaceMesh,
+      performanceMode: config.faceDetectorPerformanceMode,
+    );
   }
 
   final List<LivenessAction> _actions;

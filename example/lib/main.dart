@@ -64,6 +64,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   List<String> _registeredFaceIds = [];
 
+  // ML Kit performanceMode toggle — see LivenessConfig.faceDetectorPerformanceMode.
+  // Accurate (default) trades some latency for better off-angle face tracking.
+  bool _accurateDetection = true;
+  FaceDetectorMode get _performanceMode =>
+      _accurateDetection ? FaceDetectorMode.accurate : FaceDetectorMode.fast;
+
   @override
   void initState() {
     super.initState();
@@ -133,7 +139,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     height: 1.6,
                   ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 28),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _PerformanceModeToggle(
+                    accurate: _accurateDetection,
+                    onChanged: (v) => setState(() => _accurateDetection = v),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Column(
@@ -264,7 +278,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(LivenessScreen(actions: actions)));
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: actions,
+      performanceMode: _performanceMode,
+    )));
   }
 
   Future<void> _launchWithTFLite(BuildContext ctx) async {
@@ -274,10 +291,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableTFLite: true,
       enableVideoReplay: true,
+      performanceMode: _performanceMode,
     )));
   }
 
@@ -288,10 +306,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
       faceIdMode: FaceIdMode.auto,
+      performanceMode: _performanceMode,
     )));
     if (mounted) await _loadFaceIds();
   }
@@ -303,10 +322,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
       faceIdMode: FaceIdMode.registrationOnly,
+      performanceMode: _performanceMode,
     )));
     if (mounted) await _loadFaceIds();
   }
@@ -318,10 +338,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
       faceIdMode: FaceIdMode.verificationOnly,
+      performanceMode: _performanceMode,
     )));
   }
 
@@ -332,9 +353,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableBestFrontalCapture: true,
+      performanceMode: _performanceMode,
     )));
   }
 
@@ -414,6 +436,7 @@ class LivenessScreen extends StatelessWidget {
     this.enableTFLite = true,
     this.enableVideoReplay = false,
     this.enableBestFrontalCapture = false,
+    this.performanceMode = FaceDetectorMode.accurate,
   });
   final List<LivenessAction> actions;
   final bool enableFaceId;
@@ -421,6 +444,7 @@ class LivenessScreen extends StatelessWidget {
   final bool enableTFLite;
   final bool enableVideoReplay;
   final bool enableBestFrontalCapture;
+  final FaceDetectorMode performanceMode;
 
   @override
   Widget build(BuildContext context) {
@@ -428,6 +452,7 @@ class LivenessScreen extends StatelessWidget {
       actions: actions,
       config: LivenessConfig(
         randomizeActions: true,
+        faceDetectorPerformanceMode: performanceMode,
         enableAntiSpoof: true,
         enableBrightnessCheck: true,
         enableDuplicateFrameDetection: true,
@@ -435,9 +460,7 @@ class LivenessScreen extends StatelessWidget {
         enableBlurDetection: true,
         enableFaceId: enableFaceId,
         faceIdMode: faceIdMode,
-        // Stricter than the SDK default (0.82) to reduce false-accept risk
-        // between different people — see README's Face Identity section.
-        faceIdSimilarityThreshold: 0.86,
+        // SDK default (0.82) — no override.
         enableTFLite: enableTFLite,
         enableVideoReplayDetection: enableVideoReplay,
         enableBestFrontalCapture: enableBestFrontalCapture,
@@ -951,6 +974,60 @@ class _StatTile extends StatelessWidget {
 // ─────────────────────────────────────────────
 // Shared Widgets
 // ─────────────────────────────────────────────
+
+/// Toggle for `LivenessConfig.faceDetectorPerformanceMode` — demonstrates
+/// the accurate/fast trade-off documented in the README's Liveness Actions
+/// and Performance sections. Applies to every preset launched below.
+class _PerformanceModeToggle extends StatelessWidget {
+  const _PerformanceModeToggle({required this.accurate, required this.onChanged});
+  final bool accurate;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            accurate ? Icons.gps_fixed_rounded : Icons.speed_rounded,
+            size: 18,
+            color: accurate ? _success : _cyan,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  accurate ? 'Accurate Detection' : 'Fast Detection',
+                  style: const TextStyle(
+                    color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  accurate
+                      ? 'Better off-angle tracking, slightly higher latency'
+                      : 'Lower latency, may lose tracking on turns sooner',
+                  style: const TextStyle(color: _textSecondary, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: accurate,
+            onChanged: onChanged,
+            activeTrackColor: _success,
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _ChallengeCard extends StatefulWidget {
   const _ChallengeCard({
