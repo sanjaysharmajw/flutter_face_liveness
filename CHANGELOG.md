@@ -1,3 +1,21 @@
+## 3.5.0
+
+### New Features
+
+- **Example app: `faceDetectorBackend` toggle** — `LivenessConfig.faceDetectorBackend` (ML Kit / YOLOv8n-face) was previously only settable in code with no example-app UI, so it always silently used the `mlkit` default. Added a home-screen toggle (alongside the existing performance-mode toggle) so both backends can be compared live, applied to every Face ID preset.
+
+### Bug Fixes
+
+- **Blink/turn/smile actions slow or not registering with `faceDetectorBackend: yolov8`** — two compounding issues, both in `_processFrame()`:
+  1. `_engine.processFrame()` (the actual blink/turn/smile detection) ran *after* `await`ing YOLO detection for identity-eligible frames, instead of immediately after ML Kit detection. Fixed by moving it up, before any `await` in the rest of the function.
+  2. Even after (1), YOLO detection was still `await`ed inline — and `CameraService` holds its `_isProcessingFrame` guard for the *entire* `_processFrame()` call, so the next camera frame couldn't be accepted until YOLO's round-trip finished. This throttled overall frame throughput to YOLO's inference rate, which is still too slow to catch fast transitions like an eye-closed→open blink even though each individual frame's action detection was no longer delayed. Fixed by making YOLO detection fire-and-forget (`unawaited`, guarded by a new `_isYoloRunning` flag — same pattern already used for the TFLite/video-replay models), with the best-frontal/frontal-frame-collection bookkeeping moved into a `_recordFrontalFrame()` helper called either synchronously (ML Kit backend) or from YOLO's `.then()` callback once it resolves. Camera frame delivery, and therefore liveness-action detection, is no longer coupled to YOLO's latency at all.
+
+### Dependencies
+
+- **Widened outdated constraints** flagged by pub.dev's dependency-freshness check: `google_mlkit_face_detection` `^0.13.2` → `^0.14.0`, `google_mlkit_face_mesh_detection` `^0.4.2` → `^0.5.0`. No breaking API usage found in this codebase after the upgrade — `flutter analyze` clean on both the package and example app.
+  - Capped at these versions deliberately, not the latest (`0.15.1`/`0.6.1`): those require Dart SDK `^3.12.0`, which broke resolution for anyone on an older Flutter/Dart install (reported: Dart 3.10.4). `0.14.0`/`0.5.0` need only `>=3.8.0 <4.0.0`, matching this package's own broad `sdk: ">=3.0.0 <4.0.0"` declaration. Revisit once `^3.12.0` is a safe minimum to require.
+  - **`permission_handler` deliberately left at `^12.0.1`** (not bumped to `^13.0.1`): the newer version pulls in `permission_handler_android 14.0.0`, whose `build.gradle.kts` uses a Kotlin Gradle Plugin 2.0+-only DSL (`compilerOptions { jvmTarget = ... }`) that failed to compile against this project's configured Kotlin toolchain (reported: `Unresolved reference: compilerOptions`). Revisit once the project's Kotlin/AGP versions are updated to match.
+
 ## 3.4.0
 
 ### New Features
@@ -12,12 +30,6 @@
 - **Swift Package Manager build failure** — `ios/flutter_face_liveness/Package.swift` exported its library product as `flutter_face_liveness` (underscore). Flutter's auto-generated `FlutterGeneratedPluginSwiftPackage` requires plugin product names to be hyphenated (`flutter-face-liveness`) per the [Flutter SPM naming convention](https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-app-developers), so any app built with `flutter config --enable-swift-package-manager` failed with `product 'flutter-face-liveness' ... not found`. Fixed by renaming the library product (target name unchanged).
 
 - **`ConcurrentModificationError` on `_frontalFrames` in release builds** — when `enableFaceId: true`, `_onEngineComplete()` iterates `_frontalFrames` with a `for` loop that awaits per-frame embedding computation. Because `_processFrame()` had no guard against the engine already being complete, a camera frame arriving during that async window could still append to the same list mid-iteration, throwing `Concurrent modification during iteration`. Fixed by (1) short-circuiting `_processFrame()` once `_engine.isComplete` is true, and (2) iterating a `List.of(_frontalFrames)` snapshot as defense in depth.
-
-### Dependencies
-
-- **Widened outdated constraints** flagged by pub.dev's dependency-freshness check: `google_mlkit_face_detection` `^0.13.2` → `^0.14.0`, `google_mlkit_face_mesh_detection` `^0.4.2` → `^0.5.0`. No breaking API usage found in this codebase after the upgrade — `flutter analyze` clean on both the package and example app.
-  - Capped at these versions deliberately, not the latest (`0.15.1`/`0.6.1`): those require Dart SDK `^3.12.0`, which broke resolution for anyone on an older Flutter/Dart install (reported: Dart 3.10.4). `0.14.0`/`0.5.0` need only `>=3.8.0 <4.0.0`, matching this package's own broad `sdk: ">=3.0.0 <4.0.0"` declaration. Revisit once `^3.12.0` is a safe minimum to require.
-  - **`permission_handler` left at `^12.0.1`** (not bumped to `^13.0.1`): the newer version pulls in `permission_handler_android 14.0.0`, whose `build.gradle.kts` uses a Kotlin Gradle Plugin 2.0+-only DSL (`compilerOptions { jvmTarget = ... }`) that failed to compile against this project's configured Kotlin toolchain (reported: `Unresolved reference: compilerOptions`). Revisit once the project's Kotlin/AGP versions are updated to match.
 
 ## 3.3.0
 

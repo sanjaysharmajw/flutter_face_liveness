@@ -70,6 +70,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   FaceDetectorMode get _performanceMode =>
       _accurateDetection ? FaceDetectorMode.accurate : FaceDetectorMode.fast;
 
+  // Identity-pipeline detector backend toggle — see LivenessConfig.faceDetectorBackend.
+  // Only affects the Face ID/identity embedding pipeline; liveness actions
+  // (blink/smile/turn) always use ML Kit regardless of this setting.
+  bool _useYolo = false;
+  FaceDetectorBackend get _detectorBackend =>
+      _useYolo ? FaceDetectorBackend.yolov8 : FaceDetectorBackend.mlkit;
+
   @override
   void initState() {
     super.initState();
@@ -145,6 +152,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: _PerformanceModeToggle(
                     accurate: _accurateDetection,
                     onChanged: (v) => setState(() => _accurateDetection = v),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _DetectorBackendToggle(
+                    useYolo: _useYolo,
+                    onChanged: (v) => setState(() => _useYolo = v),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -281,6 +296,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await Navigator.of(ctx).push(_fade(LivenessScreen(
       actions: actions,
       performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
   }
 
@@ -296,6 +312,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       enableTFLite: true,
       enableVideoReplay: true,
       performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
   }
 
@@ -311,6 +328,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       enableFaceId: true,
       faceIdMode: FaceIdMode.auto,
       performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
     if (mounted) await _loadFaceIds();
   }
@@ -327,6 +345,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       enableFaceId: true,
       faceIdMode: FaceIdMode.registrationOnly,
       performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
     if (mounted) await _loadFaceIds();
   }
@@ -343,6 +362,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       enableFaceId: true,
       faceIdMode: FaceIdMode.verificationOnly,
       performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
   }
 
@@ -357,6 +377,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableBestFrontalCapture: true,
       performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
   }
 
@@ -437,6 +458,7 @@ class LivenessScreen extends StatelessWidget {
     this.enableVideoReplay = false,
     this.enableBestFrontalCapture = false,
     this.performanceMode = FaceDetectorMode.accurate,
+    this.detectorBackend = FaceDetectorBackend.mlkit,
   });
   final List<LivenessAction> actions;
   final bool enableFaceId;
@@ -445,6 +467,7 @@ class LivenessScreen extends StatelessWidget {
   final bool enableVideoReplay;
   final bool enableBestFrontalCapture;
   final FaceDetectorMode performanceMode;
+  final FaceDetectorBackend detectorBackend;
 
   @override
   Widget build(BuildContext context) {
@@ -453,6 +476,7 @@ class LivenessScreen extends StatelessWidget {
       config: LivenessConfig(
         randomizeActions: true,
         faceDetectorPerformanceMode: performanceMode,
+        faceDetectorBackend: detectorBackend,
         enableAntiSpoof: true,
         enableBrightnessCheck: true,
         enableDuplicateFrameDetection: true,
@@ -1022,6 +1046,60 @@ class _PerformanceModeToggle extends StatelessWidget {
             value: accurate,
             onChanged: onChanged,
             activeTrackColor: _success,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Toggle for `LivenessConfig.faceDetectorBackend` — demonstrates the ML Kit
+/// / YOLOv8n-face choice for the identity/embedding pipeline. Only relevant
+/// when Face ID is enabled; liveness actions always use ML Kit either way.
+class _DetectorBackendToggle extends StatelessWidget {
+  const _DetectorBackendToggle({required this.useYolo, required this.onChanged});
+  final bool useYolo;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            useYolo ? Icons.blur_on_rounded : Icons.face_retouching_natural_rounded,
+            size: 18,
+            color: useYolo ? _purple : _primary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  useYolo ? 'YOLOv8n-face Backend' : 'ML Kit Backend',
+                  style: const TextStyle(
+                    color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  useYolo
+                      ? 'Face ID identity pipeline only — downloads model on first use'
+                      : 'Default — reuses ML Kit landmarks, no extra download',
+                  style: const TextStyle(color: _textSecondary, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: useYolo,
+            onChanged: onChanged,
+            activeTrackColor: _purple,
           ),
         ],
       ),

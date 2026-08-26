@@ -1,6 +1,6 @@
 # flutter_face_liveness
 
-[![pub version](https://img.shields.io/badge/pub-3.4.0-blue)](https://pub.dev/packages/flutter_face_liveness)
+[![pub version](https://img.shields.io/badge/pub-3.5.0-blue)](https://pub.dev/packages/flutter_face_liveness)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-☕-yellow)](https://buymeacoffee.com/sanjaysharmajw)
@@ -9,10 +9,10 @@
 
 Production-ready AI-powered Flutter SDK for **real-time face liveness detection, replay attack prevention, and persistent face identity** — powered by Google ML Kit, TensorFlow Lite, and an optional YOLOv8n-face detector backend. All processing runs **entirely on-device** with zero server calls (except one-time model downloads).
 
-> ### 🆕 New in v3.4.0 — configurable detection accuracy, auto-capture, and fixes
-> `LivenessConfig.faceDetectorPerformanceMode` (default `.accurate`) improves face tracking through moderate turn/look angles; `enableBestFrontalCapture` auto-captures an upright JPEG of the user's best-angle frame alongside the liveness result. Also fixes an iOS Swift Package Manager build failure and a release-build `ConcurrentModificationError`. See [Best-Frontal Capture](#best-frontal-capture) and the [Changelog](#changelog).
+> ### 🆕 New in v3.5.0 — YOLO backend no longer throttles liveness actions
+> Fixes blink/turn/smile detection becoming slow or unresponsive with `faceDetectorBackend: yolov8` — YOLO detection is now fully fire-and-forget (never `await`ed inline), so camera-frame delivery and liveness-action timing are identical regardless of backend. See [Execution model](#face-detector-backends-ml-kit--yolov8) and the [Changelog](#changelog). Also adds an example-app toggle for `faceDetectorBackend` and widens a couple of outdated dependency constraints.
 >
-> **v3.3.0** added `FaceDetectorBackend.yolov8` (YOLOv8n-face TFLite, on its own background isolate) as an alternative to ML Kit for the identity/embedding pipeline, and [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying from a single captured photo.
+> **v3.4.0** added `LivenessConfig.faceDetectorPerformanceMode` (default `.accurate`, better off-angle tracking) and `enableBestFrontalCapture` (auto-captured JPEG on success). **v3.3.0** added `FaceDetectorBackend.yolov8` (YOLOv8n-face TFLite) as an alternative to ML Kit for the identity/embedding pipeline, and [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying from a single captured photo.
 >
 > → [Face Detector Backends (ML Kit / YOLOv8)](#face-detector-backends-ml-kit--yolov8)
 
@@ -226,7 +226,7 @@ FlutterFaceLiveness(
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^3.4.0
+  flutter_face_liveness: ^3.5.0
 ```
 
 ### 2. Platform permissions
@@ -406,6 +406,23 @@ enum FaceDetectorBackend { mlkit, yolov8 }
 |---------|-----------|-------------|
 | `FaceDetectorBackend.mlkit` *(default)* | Reuses ML Kit's own landmarks — zero extra cost, since ML Kit already runs every frame for liveness | None |
 | `FaceDetectorBackend.yolov8` | Runs a second model (YOLOv8n-face, TFLite) on identity-eligible frames only (roughly the first 7–15 frames of a session, not continuously) — may improve box/keypoint accuracy on some angles/conditions | See below |
+
+### Execution model — how the two backends actually run
+
+Selecting `yolov8` does not replace ML Kit — it **adds** a second model that runs *alongside* it:
+
+| | `mlkit` | `yolov8` |
+|---|---|---|
+| ML Kit | Runs every frame, `await`ed inline — drives liveness actions (blink/smile/turns) | Same — always runs, unconditionally |
+| YOLOv8n-face | Not loaded, never runs | Runs **fire-and-forget** on its own background isolate for identity-eligible frames |
+
+The YOLO call is never `await`ed inline in the camera-frame path — it's dispatched with `unawaited()` (guarded so only one run is in flight at a time) and its result is merged back in later via a callback, whenever the background isolate finishes. This means:
+
+- Camera-frame delivery and liveness-action detection are **never** throttled by YOLO's inference time, however long it takes.
+- ML Kit's own frame-by-frame timing is identical whether `yolov8` is selected or not.
+- The trade-off is that the "best" frame picked for the identity embedding may occasionally lack YOLO keypoints if YOLO is still mid-inference on an earlier frame when a later, more-frontal frame arrives — a bbox-only fallback is used in that case, which has no effect on liveness itself.
+
+> **Try it**: the example app has a **"YOLOv8n-face Backend"** switch on the home screen — one toggle, applied to every Face ID preset — so you can compare both backends live without editing code.
 
 ### Enable it
 
@@ -983,6 +1000,10 @@ flutter run
 
 Eight challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · With TFLite Anti-Spoof · Best-Frontal Capture.
 
+Two home-screen toggles apply to every preset:
+- **Accurate / Fast Detection** — `LivenessConfig.faceDetectorPerformanceMode`
+- **ML Kit / YOLOv8n-face Backend** — `LivenessConfig.faceDetectorBackend` (identity pipeline only; downloads the YOLO model on first use when switched on)
+
 **Testing replay detection:**
 1. Enable `showDebugOverlay: true` in the example config
 2. Run the check normally — all 8 signal bars should be green (`ok`)
@@ -994,9 +1015,9 @@ Eight challenge presets: Standard · Extended · Full · Face ID Auto · Registe
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
-Latest: **v3.4.0** — Configurable `faceDetectorPerformanceMode` (default `.accurate`), `enableBestFrontalCapture` auto-photo capture, iOS SPM build fix, release-build `ConcurrentModificationError` fix.
+Latest: **v3.5.0** — Fixes blink/turn/smile detection being throttled by `faceDetectorBackend: yolov8` (YOLO detection is now fully fire-and-forget); example-app toggle for `faceDetectorBackend`; widened outdated dependency constraints.
 
-Previous: **v3.3.0** — Optional YOLOv8n-face detector backend for the identity pipeline (`FaceDetectorBackend`), `FaceCaptureService` for photo-based enrollment/verification, both running on dedicated background isolates.
+Previous: **v3.4.0** — Configurable `faceDetectorPerformanceMode` (default `.accurate`), `enableBestFrontalCapture` auto-photo capture, iOS SPM build fix, release-build `ConcurrentModificationError` fix.
 
 ---
 
