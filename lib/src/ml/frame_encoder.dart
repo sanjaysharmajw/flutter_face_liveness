@@ -42,13 +42,25 @@ Uint8List? encodeFrameToJpeg(RawFrameData frame, {int quality = 85}) {
       }
     }
 
-    // Rotate raw sensor-space pixels to upright — copyRotate's angle is
-    // clockwise, matching Android's sensorOrientation convention (the same
-    // clockwise-degrees value ML Kit is handed via InputImageRotation).
-    final upright = switch (frame.sensorOrientation) {
-      90 || 180 || 270 => img.copyRotate(image, angle: frame.sensorOrientation),
-      _ => image,
+    // Rotate raw sensor-space pixels to upright. copyRotate's angle is
+    // clockwise, but it is NOT simply `sensorOrientation` — 90/270 must be
+    // swapped relative to that value. Verified against this file's own
+    // already-tested inverse transform (FacePreprocessor._landmarkToSensor,
+    // which un-rotates ML Kit's display-space coordinates back to sensor
+    // space): composing that inverse with copyRotate's actual per-angle
+    // pixel mapping (image package's _rotate90/_rotate270) shows
+    // sensorOrientation=90 needs copyRotate(angle: 270) to land upright, and
+    // sensorOrientation=270 needs copyRotate(angle: 90) — using
+    // sensorOrientation directly (the naive assumption) produces a JPEG
+    // rotated 180° off from correct on any device where the front camera's
+    // sensorOrientation is 90 or 270 (the common non-zero values).
+    final rotateAngle = switch (frame.sensorOrientation) {
+      90 => 270,
+      270 => 90,
+      180 => 180,
+      _ => 0,
     };
+    final upright = rotateAngle == 0 ? image : img.copyRotate(image, angle: rotateAngle);
 
     return img.encodeJpg(upright, quality: quality);
   } catch (e) {

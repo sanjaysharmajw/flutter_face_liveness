@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import '../models/face_detector_backend.dart';
 import 'face_identity_service.dart';
 import 'yolo_face_detector_service.dart';
+import 'scrfd_face_detector_service.dart';
 
 /// Outcome of [FaceCaptureService.captureAndIdentify].
 ///
@@ -37,10 +38,10 @@ class FaceCaptureResult {
 /// from a single captured picture rather than a full liveness session.
 ///
 /// Composes existing services without duplicating their logic:
-/// face detection ([FaceDetectorService]/[YoloFaceDetectorService] via
-/// [FaceDetectorBackend]), alignment ([FacePreprocessor], through
-/// [FaceIdentityService.computeEmbeddingFromRgb]), and matching
-/// ([FaceIdentityService.identifyFromEmbeddings]).
+/// face detection ([FaceDetectorService]/[YoloFaceDetectorService]/
+/// [ScrfdFaceDetectorService] via [FaceDetectorBackend]), alignment
+/// ([FacePreprocessor], through [FaceIdentityService.computeEmbeddingFromRgb]),
+/// and matching ([FaceIdentityService.identifyFromEmbeddings]).
 class FaceCaptureService {
   FaceCaptureService({
     required FaceIdentityService faceIdentity,
@@ -68,22 +69,44 @@ class FaceCaptureService {
 
   FaceDetector? _mlkitDetector;
   YoloFaceDetectorService? _yoloDetector;
+  ScrfdFaceDetectorService? _scrfdDetector;
 
   /// Loads the selected detector backend. Call once before [captureAndIdentify].
-  /// (ML Kit's detector initialises instantly; YOLOv8 downloads its model on
-  /// first use — pass [onYoloModelDownloadProgress] to surface that.)
+  /// (ML Kit's detector initialises instantly; YOLOv8/SCRFD download their
+  /// model on first use — pass [onYoloModelDownloadProgress] to surface that;
+  /// the name predates the [FaceDetectorBackend.scrfd] backend but the
+  /// callback applies to whichever non-mlkit backend is selected.)
+  ///
+  /// A failed YOLOv8/SCRFD download or load is caught and never propagates
+  /// out of this method — matching [LivenessController]'s isolation
+  /// guarantee for the same models. [captureAndIdentify] reports a clear
+  /// rejection reason for that case instead of throwing.
   Future<void> initialize({void Function(double)? onYoloModelDownloadProgress}) async {
-    if (backend == FaceDetectorBackend.mlkit) {
-      _mlkitDetector = FaceDetector(
-        options: FaceDetectorOptions(
-          enableClassification: false,
-          enableLandmarks: true,
-          performanceMode: FaceDetectorMode.accurate, // one-shot, not real-time
-        ),
-      );
-    } else {
-      _yoloDetector = YoloFaceDetectorService();
-      await _yoloDetector!.load(onProgress: onYoloModelDownloadProgress);
+    switch (backend) {
+      case FaceDetectorBackend.mlkit:
+        _mlkitDetector = FaceDetector(
+          options: FaceDetectorOptions(
+            enableClassification: false,
+            enableLandmarks: true,
+            performanceMode: FaceDetectorMode.accurate, // one-shot, not real-time
+          ),
+        );
+      case FaceDetectorBackend.yolov8:
+        try {
+          _yoloDetector = YoloFaceDetectorService();
+          await _yoloDetector!.load(onProgress: onYoloModelDownloadProgress);
+        } catch (e) {
+          debugPrint('[FaceCaptureService] YOLOv8 detector unavailable: $e');
+          _yoloDetector = null;
+        }
+      case FaceDetectorBackend.scrfd:
+        try {
+          _scrfdDetector = ScrfdFaceDetectorService();
+          await _scrfdDetector!.load(onProgress: onYoloModelDownloadProgress);
+        } catch (e) {
+          debugPrint('[FaceCaptureService] SCRFD detector unavailable: $e');
+          _scrfdDetector = null;
+        }
     }
   }
 
@@ -120,12 +143,16 @@ class FaceCaptureService {
     double? leftEyeX, leftEyeY, rightEyeX, rightEyeY;
 
     if (backend == FaceDetectorBackend.yolov8) {
-      final detections = await _yoloDetector?.detectFromRgbBytes(
+      if (_yoloDetector == null) {
+        return const FaceCaptureResult.rejected(
+            'YOLOv8 face detector unavailable — model failed to load or download');
+      }
+      final detections = await _yoloDetector!.detectFromRgbBytes(
         rgbBytes: decoded.getBytes(order: img.ChannelOrder.rgb),
         width: decoded.width,
         height: decoded.height,
         confidenceThreshold: detectionConfidenceThreshold,
-      ) ?? const [];
+      );
       if (detections.isEmpty) {
         return const FaceCaptureResult.rejected('No face detected');
       }
@@ -136,6 +163,27 @@ class FaceCaptureService {
       bbox = best.boundingBox;
       leftEyeX = best.leftEye?.dx;   leftEyeY = best.leftEye?.dy;
       rightEyeX = best.rightEye?.dx; rightEyeY = best.rightEye?.dy;
+    } else if (backend == FaceDetectorBackend.scrfd) {
+      if (_scrfdDetector == null) {
+        return const FaceCaptureResult.rejected(
+            'SCRFD face detector unavailable — model failed to load or download');
+      }
+      final detections = await _scrfdDetector!.detectFromRgbBytes(
+        rgbBytes: decoded.getBytes(order: img.ChannelOrder.rgb),
+        width: decoded.width,
+        height: decoded.height,
+        confidenceThreshold: detectionConfidenceThreshold,
+      );
+      if (detections.isEmpty) {
+        return const FaceCaptureResult.rejected('No face detected');
+      }
+      final best = detections.reduce(
+        (a, b) => a.boundingBox.width * a.boundingBox.height >
+                   b.boundingBox.width * b.boundingBox.height ? a : b,
+      );
+      bbox = best.boundingBox;
+      leftEyeX = best.leftEye.dx;   leftEyeY = best.leftEye.dy;
+      rightEyeX = best.rightEye.dx; rightEyeY = best.rightEye.dy;
     } else {
       final detector = _mlkitDetector;
       if (detector == null) {
@@ -258,5 +306,6 @@ class FaceCaptureService {
   Future<void> dispose() async {
     await _mlkitDetector?.close();
     _yoloDetector?.dispose();
+    _scrfdDetector?.dispose();
   }
 }

@@ -4,22 +4,24 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
-/// Downloads and caches the YOLOv8n-face TFLite model on first use.
+/// Downloads and caches the SCRFD-2.5G-KPS TFLite model on first use.
 ///
-/// Mirrors [FaceModelDownloader]/[TFLiteModelDownloader]: fetched once from
+/// Mirrors [YoloModelDownloader]/[FaceModelDownloader]: fetched once from
 /// [modelUrl], stored in the app documents directory, served from cache on
 /// every subsequent call.
-class YoloModelDownloader {
-  static const String _modelFileName = 'ffl_yolov8n_face.tflite';
+class ScrfdModelDownloader {
+  static const String _modelFileName = 'ffl_scrfd_2.5g_face.tflite';
 
   /// Minimum valid file size — guards against incomplete downloads.
   static const int _minValidBytes = 512 * 1024; // 512 KB
 
-  /// Default bundled YOLOv8n-face model — hosted on this package's own
-  /// GitHub Release. Works out of the box; override [modelUrl] only to swap
-  /// in a custom-trained/exported model.
+  /// Default bundled SCRFD-2.5G-KPS model.
+  ///
+  /// Converted from the verified official InsightFace ONNX export
+  /// (`scrfd_2.5g_bnkps.onnx`, hosted at the `.onnx` sibling asset in this
+  /// same release) via `onnx2tf` — see CHANGELOG for the conversion steps.
   static const String bundledModelUrl =
-      'https://github.com/sanjaysharmajw/flutter_face_liveness/releases/download/v3.2.0-models/yolov8n-face.tflite';
+      'https://github.com/sanjaysharmajw/flutter_face_liveness/releases/download/v3.2.0-models/scrfd_2.5g_bnkps_float32.tflite';
 
   /// Remote URL to download the model from.
   final String modelUrl;
@@ -30,7 +32,7 @@ class YoloModelDownloader {
   /// Called with 0.0–1.0 during download; not called when served from cache.
   final void Function(double progress)? onProgress;
 
-  YoloModelDownloader({
+  ScrfdModelDownloader({
     String? modelUrl,
     this.fallbackUrl,
     this.onProgress,
@@ -39,34 +41,34 @@ class YoloModelDownloader {
   /// Returns the absolute filesystem path to the cached model, downloading it
   /// first if it is missing or corrupted.
   ///
-  /// Throws [YoloModelDownloadException] when both primary and fallback fail.
+  /// Throws [ScrfdModelDownloadException] when both primary and fallback fail.
   Future<String> ensureModel() async {
     final dir  = await getApplicationDocumentsDirectory();
     final path = '${dir.path}/$_modelFileName';
     final file = File(path);
 
     if (await _isValid(file)) {
-      debugPrint('[YoloModelDownloader] Using cached model at $path');
+      debugPrint('[ScrfdModelDownloader] Using cached model at $path');
       return path;
     }
 
-    debugPrint('[YoloModelDownloader] Downloading YOLOv8n-face model…');
+    debugPrint('[ScrfdModelDownloader] Downloading SCRFD-2.5G-KPS model…');
     await _download(modelUrl, file);
 
     if (!await _isValid(file) && fallbackUrl != null) {
-      debugPrint('[YoloModelDownloader] Primary download incomplete, trying fallback…');
+      debugPrint('[ScrfdModelDownloader] Primary download incomplete, trying fallback…');
       await _download(fallbackUrl!, file);
     }
 
     if (!await _isValid(file)) {
-      throw YoloModelDownloadException(
-        'Failed to download the YOLOv8n-face model.\n'
+      throw ScrfdModelDownloadException(
+        'Failed to download the SCRFD-2.5G-KPS model.\n'
         'Primary URL: $modelUrl\n'
         'Check your internet connection, or that the release asset exists.',
       );
     }
 
-    debugPrint('[YoloModelDownloader] Model ready: $path');
+    debugPrint('[ScrfdModelDownloader] Model ready: $path');
     return path;
   }
 
@@ -81,7 +83,7 @@ class YoloModelDownloader {
       final response = await http.Client().send(request);
 
       if (response.statusCode != 200) {
-        debugPrint('[YoloModelDownloader] HTTP ${response.statusCode} from $url');
+        debugPrint('[ScrfdModelDownloader] HTTP ${response.statusCode} from $url');
         return;
       }
 
@@ -98,7 +100,7 @@ class YoloModelDownloader {
       await sink.close();
       onProgress?.call(1.0);
     } catch (e) {
-      debugPrint('[YoloModelDownloader] Download error from $url: $e');
+      debugPrint('[ScrfdModelDownloader] Download error from $url: $e');
       if (await dest.exists()) await dest.delete();
     }
   }
@@ -108,14 +110,14 @@ class YoloModelDownloader {
     final dir  = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/$_modelFileName');
     if (await file.exists()) await file.delete();
-    debugPrint('[YoloModelDownloader] Cache cleared');
+    debugPrint('[ScrfdModelDownloader] Cache cleared');
   }
 }
 
-class YoloModelDownloadException implements Exception {
-  const YoloModelDownloadException(this.message);
+class ScrfdModelDownloadException implements Exception {
+  const ScrfdModelDownloadException(this.message);
   final String message;
 
   @override
-  String toString() => 'YoloModelDownloadException: $message';
+  String toString() => 'ScrfdModelDownloadException: $message';
 }

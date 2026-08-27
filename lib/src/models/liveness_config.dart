@@ -65,6 +65,9 @@ class LivenessConfig {
     this.yoloModelUrl,
     this.yoloConfidenceThreshold = 0.5,
     this.yoloIouThreshold = 0.45,
+    this.scrfdModelUrl,
+    this.scrfdConfidenceThreshold = 0.5,
+    this.scrfdIouThreshold = 0.45,
 
     // ── Best-frontal capture ────────────────────────────────────────────
     this.enableBestFrontalCapture = false,
@@ -211,6 +214,16 @@ class LivenessConfig {
   /// IoU threshold for YOLOv8n-face non-max suppression.
   final double yoloIouThreshold;
 
+  /// Override URL for the SCRFD-2.5G-KPS TFLite model. Falls back to
+  /// [ScrfdModelDownloader.bundledModelUrl] when null.
+  final String? scrfdModelUrl;
+
+  /// Minimum detection confidence for a SCRFD-2.5G-KPS box to be kept.
+  final double scrfdConfidenceThreshold;
+
+  /// IoU threshold for SCRFD-2.5G-KPS non-max suppression.
+  final double scrfdIouThreshold;
+
   /// When true, tracks the most-frontal frame seen during the session (by
   /// |yaw|+|pitch|) and exposes it as [LivenessResult.bestFrontalImageBytes]
   /// (upright JPEG) on completion — a human-viewable capture (e.g. for a KYC
@@ -273,6 +286,9 @@ class LivenessConfig {
     String? yoloModelUrl,
     double? yoloConfidenceThreshold,
     double? yoloIouThreshold,
+    String? scrfdModelUrl,
+    double? scrfdConfidenceThreshold,
+    double? scrfdIouThreshold,
     bool? enableBestFrontalCapture,
     int? bestFrontalJpegQuality,
     ThemeMode? themeMode,
@@ -318,6 +334,9 @@ class LivenessConfig {
       yoloModelUrl: yoloModelUrl ?? this.yoloModelUrl,
       yoloConfidenceThreshold: yoloConfidenceThreshold ?? this.yoloConfidenceThreshold,
       yoloIouThreshold: yoloIouThreshold ?? this.yoloIouThreshold,
+      scrfdModelUrl: scrfdModelUrl ?? this.scrfdModelUrl,
+      scrfdConfidenceThreshold: scrfdConfidenceThreshold ?? this.scrfdConfidenceThreshold,
+      scrfdIouThreshold: scrfdIouThreshold ?? this.scrfdIouThreshold,
       enableBestFrontalCapture: enableBestFrontalCapture ?? this.enableBestFrontalCapture,
       bestFrontalJpegQuality: bestFrontalJpegQuality ?? this.bestFrontalJpegQuality,
       themeMode: themeMode ?? this.themeMode,

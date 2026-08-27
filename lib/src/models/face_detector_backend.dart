@@ -17,4 +17,11 @@ enum FaceDetectorBackend {
   /// accurate face boxes/keypoints in some conditions, at the cost of extra
   /// inference time per frame.
   yolov8,
+
+  /// SCRFD-2.5G-KPS (TFLite, downloaded on first use). Runs as a second model
+  /// alongside ML Kit specifically for identity-eligible frames — an
+  /// anchor-based detector (InsightFace) generally more accurate than
+  /// YOLOv8n-face at small/angled faces, at a similar extra inference cost
+  /// per frame.
+  scrfd,
 }

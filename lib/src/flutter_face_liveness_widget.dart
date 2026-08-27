@@ -7,6 +7,7 @@ import 'models/liveness_action.dart';
 import 'models/liveness_result.dart';
 import 'models/liveness_config.dart';
 import 'models/detection_status.dart';
+import 'models/face_detector_backend.dart';
 import 'ui/face_overlay_painter.dart';
 import 'ui/liveness_instructions_widget.dart';
 import 'ui/status_indicator_widget.dart';
@@ -102,10 +103,24 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
   Widget _loadingView() {
     return Consumer<LivenessController>(
       builder: (_, ctrl, __) {
-        final faceIdProgress  = ctrl.faceIdModelDownloadProgress;
-        final tfliteProgress  = ctrl.tfliteModelDownloadProgress;
-        final dlProgress      = tfliteProgress ?? faceIdProgress;
-        final isTfliteDl      = tfliteProgress != null;
+        // All models (TFLite anti-spoof/video-replay, FaceNet, and the
+        // selected identity-pipeline backend — YOLOv8n-face or SCRFD-2.5G-KPS)
+        // download sequentially in LivenessController.initialize(), entirely
+        // before the camera opens — this view is shown for the whole
+        // duration, so every one of them needs its own progress label here,
+        // not just TFLite/FaceNet. Only one is ever active at a time.
+        final entries = <(double? progress, String label)>[
+          (ctrl.tfliteModelDownloadProgress, 'Downloading Anti-Spoof model…'),
+          (ctrl.faceIdModelDownloadProgress, 'Downloading Face ID model…'),
+          (ctrl.yoloModelDownloadProgress,   'Downloading YOLOv8n-face model…'),
+          (ctrl.scrfdModelDownloadProgress,  'Downloading SCRFD-2.5G-KPS model…'),
+        ];
+        (double? progress, String label)? active;
+        for (final e in entries) {
+          if (e.$1 != null) { active = e; break; }
+        }
+        final dlProgress = active?.$1;
+        final label = active?.$2;
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -122,9 +137,7 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
               const SizedBox(height: 20),
               Text(
                 dlProgress != null
-                    ? isTfliteDl
-                        ? 'Downloading Anti-Spoof model… ${(dlProgress * 100).toInt()}%'
-                        : 'Downloading Face ID model… ${(dlProgress * 100).toInt()}%'
+                    ? '$label ${(dlProgress * 100).toInt()}%'
                     : 'Starting camera…',
                 style: TextStyle(
                   color: _isDark ? Colors.white54 : Colors.black45,
@@ -239,6 +252,24 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
           right: 0,
           child: Center(child: StatusIndicatorWidget(status: ctrl.status)),
         ),
+
+        // Secondary-detector badge (top right) — live proof that
+        // faceDetectorBackend: yolov8/scrfd is actually running, since its
+        // result never reaches the face overlay above (that always reflects
+        // ML Kit, which drives liveness actions regardless of this setting).
+        if (ctrl.isSecondaryDetectorActive)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 14,
+            right: 14,
+            child: _SecondaryDetectorBadge(
+              backendLabel: widget.config.faceDetectorBackend == FaceDetectorBackend.yolov8
+                  ? 'YOLOv8n-face'
+                  : 'SCRFD-2.5G-KPS',
+              runCount: ctrl.secondaryDetectorRunCount,
+              lastDetectionCount: ctrl.lastSecondaryDetectionCount,
+              isDark: _isDark,
+            ),
+          ),
 
         // Step indicator (below oval)
         Positioned(
@@ -401,6 +432,73 @@ class _FlutterFaceLivenessState extends State<FlutterFaceLiveness>
           style: const TextStyle(
               color: Colors.white, fontSize: 10, fontFamily: 'monospace'),
         ),
+      ),
+    );
+  }
+}
+
+/// Small always-visible pill confirming the selected secondary detector
+/// (YOLOv8n-face / SCRFD-2.5G-KPS) is actually executing — shown only when
+/// [LivenessController.isSecondaryDetectorActive] is true, i.e.
+/// `enableFaceId: true` and `faceDetectorBackend` is not `.mlkit`.
+///
+/// Necessary because that backend's output never reaches the face-tracking
+/// oval overlay (which always reflects ML Kit — the detector that drives
+/// liveness actions regardless of this setting) — without this, there is no
+/// visible way to confirm the alternate backend ran at all.
+class _SecondaryDetectorBadge extends StatelessWidget {
+  const _SecondaryDetectorBadge({
+    required this.backendLabel,
+    required this.runCount,
+    required this.lastDetectionCount,
+    required this.isDark,
+  });
+
+  final String backendLabel;
+  final int runCount;
+  final int? lastDetectionCount;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color dotColor;
+    final String statusText;
+    if (runCount == 0) {
+      dotColor = Colors.amber;
+      statusText = 'starting…';
+    } else if ((lastDetectionCount ?? 0) > 0) {
+      dotColor = const Color(0xFF10B981);
+      statusText = 'face detected';
+    } else {
+      dotColor = Colors.amber;
+      statusText = 'no face yet';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: (isDark ? Colors.black : Colors.white).withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$backendLabel · $statusText'
+            '${runCount > 0 ? ' (${runCount}x)' : ''}',
+            style: TextStyle(
+              color: isDark ? Colors.white70 : Colors.black87,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -2,7 +2,7 @@ import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 import 'dart:isolate' show Isolate;
 import 'dart:math' show min;
-import 'dart:ui' show Rect;
+import 'dart:ui' show Rect, Offset;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -23,11 +23,34 @@ import 'ml/frame_encoder.dart';
 import 'liveness/liveness_engine.dart';
 import 'identity/face_identity_service.dart';
 import 'identity/yolo_face_detector_service.dart';
+import 'identity/scrfd_face_detector_service.dart';
 import 'models/face_detector_backend.dart';
 import 'analysis/replay_analyzer.dart';
 import 'analysis/screen_artifact_detector.dart';
 import 'analysis/optical_flow_analyzer.dart';
 import 'analysis/face_geometry_analyzer.dart';
+
+/// Backend-agnostic detection result used internally to feed the identity
+/// pipeline — adapts whichever secondary detector is active
+/// ([YoloFaceDetection] or [ScrfdFaceDetection]) to a single shape so the
+/// frontal-frame tracking / embedding code below doesn't need to branch on
+/// [FaceDetectorBackend] beyond choosing which detector to run.
+class _IdentityFaceBox {
+  const _IdentityFaceBox({required this.boundingBox, this.leftEye, this.rightEye, required this.hasEyes});
+
+  final Rect boundingBox;
+  final Offset? leftEye;
+  final Offset? rightEye;
+  final bool hasEyes;
+
+  factory _IdentityFaceBox.fromYolo(YoloFaceDetection d) => _IdentityFaceBox(
+        boundingBox: d.boundingBox, leftEye: d.leftEye, rightEye: d.rightEye, hasEyes: d.hasEyes,
+      );
+
+  factory _IdentityFaceBox.fromScrfd(ScrfdFaceDetection d) => _IdentityFaceBox(
+        boundingBox: d.boundingBox, leftEye: d.leftEye, rightEye: d.rightEye, hasEyes: d.hasEyes,
+      );
+}
 
 /// ChangeNotifier that drives the full liveness verification session.
 ///
@@ -57,6 +80,7 @@ class LivenessController extends ChangeNotifier {
   TFLiteService?          _videoReplay;
   FaceIdentityService?    _faceIdentity;
   YoloFaceDetectorService? _yoloDetector;
+  ScrfdFaceDetectorService? _scrfdDetector;
   LivenessEngine?         _engine;
 
   bool _isInitialized = false;
@@ -70,18 +94,20 @@ class LivenessController extends ChangeNotifier {
   // Their embeddings are averaged at session end for a stable identity estimate.
   static const int    _maxFrontalFrames   = 7;
   static const double _frontalAngleLimit  = 20.0;
-  // [yolo] is populated only when faceDetectorBackend == yolov8 — the YOLO
-  // box/keypoints for this frame supersede ML Kit's when computing the
-  // embedding (see _onEngineComplete). Null under the default mlkit backend.
-  final List<({RawFrameData raw, FaceData face, YoloFaceDetection? yolo})> _frontalFrames = [];
+  // [detection] is populated only when faceDetectorBackend != mlkit — the
+  // secondary backend's box/keypoints for this frame supersede ML Kit's when
+  // computing the embedding (see _onEngineComplete). Null under the default
+  // mlkit backend.
+  final List<({RawFrameData raw, FaceData face, _IdentityFaceBox? detection})> _frontalFrames = [];
   // Best single frontal frame — fallback if no frames pass the angle limit.
   RawFrameData?      _bestFrontalFrame;
   FaceData?          _bestFrontalFace;
-  YoloFaceDetection? _bestFrontalYolo;
+  _IdentityFaceBox?  _bestFrontalDetection;
   double         _bestFrontalScore = double.infinity;
   String?        _error;
   double?        _faceIdModelDownloadProgress;
   double?        _yoloModelDownloadProgress;
+  double?        _scrfdModelDownloadProgress;
   double?        _tfliteModelDownloadProgress;
   String?        _tfliteWarning;
   double?        _lastTfliteScore;
@@ -92,7 +118,17 @@ class LivenessController extends ChangeNotifier {
   bool           _isVideoReplayRunning = false;
   Future<void>?  _videoReplayFuture;
 
-  bool           _isYoloRunning = false;
+  // Only one non-mlkit backend is ever active per session (single enum
+  // value), so one flag covers both YOLOv8 and SCRFD.
+  bool           _isSecondaryDetectorRunning = false;
+  // Live confirmation that the selected secondary backend (yolov8/scrfd) is
+  // actually running — surfaced via [secondaryDetectorRunCount]/
+  // [lastSecondaryDetectionCount] so an app (or the example app) can show
+  // visible proof, since these backends only ever run on Face ID-eligible
+  // frames and their result never reaches the on-screen face overlay
+  // (that always reflects ML Kit, which is what drives liveness actions).
+  int            _secondaryDetectorRunCount = 0;
+  int?           _lastSecondaryDetectionCount;
 
   // Temporal brightness variance history — secondary AEC-sensitive signal.
   final _faceCropBrightnessHistory = <double>[];
@@ -146,6 +182,25 @@ class LivenessController extends ChangeNotifier {
   /// the first time (only relevant when [LivenessConfig.faceDetectorBackend]
   /// is [FaceDetectorBackend.yolov8]). Null when loading from cache or complete.
   double?         get yoloModelDownloadProgress => _yoloModelDownloadProgress;
+  /// Non-null (0.0–1.0) while the SCRFD-2.5G-KPS model is being downloaded
+  /// for the first time (only relevant when [LivenessConfig.faceDetectorBackend]
+  /// is [FaceDetectorBackend.scrfd]). Null when loading from cache or complete.
+  double?         get scrfdModelDownloadProgress => _scrfdModelDownloadProgress;
+  /// True when a secondary detector (YOLOv8n-face or SCRFD-2.5G-KPS) is
+  /// configured, loaded, and eligible to run this session — i.e.
+  /// `enableFaceId: true` and `faceDetectorBackend != mlkit`, and the model
+  /// loaded successfully (didn't silently fall back to ML Kit after a failed
+  /// download). Use this to show/hide a "backend X is active" indicator.
+  bool            get isSecondaryDetectorActive =>
+      _config.enableFaceId && (_yoloDetector != null || _scrfdDetector != null);
+  /// How many times the secondary detector (YOLOv8n-face/SCRFD-2.5G-KPS) has
+  /// actually run and returned a result this session — increments only on a
+  /// completed inference, so a non-zero value is live proof the selected
+  /// backend is really executing (not just configured).
+  int             get secondaryDetectorRunCount => _secondaryDetectorRunCount;
+  /// Face count from the most recent secondary-detector run (0 or more).
+  /// Null until the first run completes.
+  int?            get lastSecondaryDetectionCount => _lastSecondaryDetectionCount;
   FaceData?       get currentFace           => _currentFace;
   FrameQuality?   get lastQuality           => _lastQuality;
   double?         get lastVideoReplayScore   => _lastVideoReplayScore;
@@ -332,6 +387,28 @@ class LivenessController extends ChangeNotifier {
         }
       }
 
+      // SCRFD-2.5G-KPS — same opt-in alternative detector role as YOLOv8
+      // above (identity pipeline only), same isolation guarantee.
+      if (_config.enableFaceId && _config.faceDetectorBackend == FaceDetectorBackend.scrfd) {
+        try {
+          _scrfdDetector = ScrfdFaceDetectorService();
+          await _scrfdDetector!.load(
+            modelUrl: _config.scrfdModelUrl,
+            onProgress: (p) {
+              _scrfdModelDownloadProgress = p;
+              notifyListeners();
+            },
+          );
+          if (_isDisposed) return;
+          _scrfdModelDownloadProgress = null;
+          notifyListeners();
+        } catch (e) {
+          debugPrint('[LivenessController] SCRFD face detector unavailable this session: $e');
+          _scrfdDetector = null;
+          _scrfdModelDownloadProgress = null;
+        }
+      }
+
       _engine = LivenessEngine(
         requiredActions: _actions,
         config: _config,
@@ -392,16 +469,23 @@ class LivenessController extends ChangeNotifier {
     if (result.rawFrame  != null) _lastRawFrame = result.rawFrame;
     if (result.meshData  != null) _lastMeshData = result.meshData;
 
-    // Liveness action detection (blink/turn/smile/etc.) runs immediately,
-    // before anything below that awaits (YOLO detection). It must never be
-    // delayed by those — a delayed frame here means a missed fast eye-closed
-    // →open transition, since CameraService drops new frames while this
-    // async call is still in flight (see _isProcessingFrame).
-    _engine?.processFrame(result.faces, quality: result.quality, meshData: result.meshData);
-
     // Track the best (most-frontal) frame for LivenessResult.bestFrontalImageBytes,
     // and — when Face ID is on — collect frontal frames for identity, averaged
     // at session end for a stable embedding (single-frame embeddings are noisy).
+    //
+    // This runs BEFORE _engine?.processFrame() below — not after — even
+    // though it was previously the other way around. Reason: when this
+    // frame happens to complete the last required action,
+    // _engine.processFrame() synchronously invokes onAllActionsCompleted →
+    // _onEngineComplete(), which (when TFLite/video-replay aren't currently
+    // mid-inference) synchronously snapshots _frontalFrames/_bestFrontalFrame
+    // before hitting its own first `await` — i.e. before this frame would
+    // otherwise get a chance to update them. Running this block first closes
+    // that race for the synchronous (mlkit) path entirely. It's still safe
+    // with respect to the blink-latency fix below: everything in this block
+    // is either instant synchronous math or wrapped in `unawaited()` (the
+    // yolov8/scrfd branch), so it adds zero delay before
+    // _engine.processFrame() runs.
     if ((_config.enableFaceId || _config.enableBestFrontalCapture) &&
         _currentFace != null && result.rawFrame != null) {
       final frontality = _currentFace!.headEulerAngleY.abs() + _currentFace!.headEulerAngleX.abs();
@@ -413,46 +497,83 @@ class LivenessController extends ChangeNotifier {
       final raw  = result.rawFrame!;
       final face = _currentFace!;
 
-      // When the yolov8 backend is selected, run it on this frame to get the
-      // box/eye-points that will feed the embedding instead of ML Kit's own
-      // landmarks. Fire-and-forget (unawaited, guarded by _isYoloRunning) —
-      // NOT awaited inline, because CameraService holds _isProcessingFrame
-      // true for this entire function call, so awaiting here would throttle
-      // camera-frame delivery to YOLO's round-trip rate and delay every
-      // subsequent frame's liveness-action detection too (see CHANGELOG).
+      // When a secondary backend (yolov8/scrfd) is selected, run it on this
+      // frame to get the box/eye-points that will feed the embedding instead
+      // of ML Kit's own landmarks. Fire-and-forget (unawaited, guarded by
+      // _isSecondaryDetectorRunning) — NOT awaited inline, because
+      // CameraService holds _isProcessingFrame true for this entire function
+      // call, so awaiting here would throttle camera-frame delivery to the
+      // detector's round-trip rate and delay every subsequent frame's
+      // liveness-action detection too (see CHANGELOG).
+      //
+      // The detector call is only ever CONSTRUCTED (which — being an async
+      // function — starts executing immediately, sending a message to the
+      // worker isolate before its first `await`) inside the full guard
+      // below. Building it earlier, unconditionally, would dispatch an
+      // inference request on every qualifying camera frame (~20-30fps)
+      // instead of only the ~7-15 identity-eligible candidate frames per
+      // session — exactly the flood this guard exists to prevent.
       if (_config.enableFaceId &&
           (isCandidateForBest || isCandidateForCollection) &&
-          _config.faceDetectorBackend == FaceDetectorBackend.yolov8 &&
-          _yoloDetector != null &&
-          !_isYoloRunning) {
-        _isYoloRunning = true;
-        unawaited(_yoloDetector!.detectFromRawFrame(
-          imageBytes: raw.imageBytes,
-          imageWidth: raw.imageWidth,
-          imageHeight: raw.imageHeight,
-          confidenceThreshold: _config.yoloConfidenceThreshold,
-          iouThreshold: _config.yoloIouThreshold,
-        ).then((detections) {
-          _isYoloRunning = false;
-          if (_isDisposed) return;
-          YoloFaceDetection? yoloFace;
-          if (detections.isNotEmpty) {
-            yoloFace = detections.reduce((a, b) =>
-                a.boundingBox.width * a.boundingBox.height >
-                b.boundingBox.width * b.boundingBox.height ? a : b);
-          }
-          // Re-check candidacy — by the time this resolves, later frames may
-          // have already updated _bestFrontalScore/_frontalFrames.
+          !_isSecondaryDetectorRunning) {
+        Future<List<_IdentityFaceBox>>? detectorCall;
+        if (_config.faceDetectorBackend == FaceDetectorBackend.yolov8 && _yoloDetector != null) {
+          detectorCall = _yoloDetector!.detectFromRawFrame(
+            imageBytes: raw.imageBytes,
+            imageWidth: raw.imageWidth,
+            imageHeight: raw.imageHeight,
+            confidenceThreshold: _config.yoloConfidenceThreshold,
+            iouThreshold: _config.yoloIouThreshold,
+          ).then((detections) => detections.map(_IdentityFaceBox.fromYolo).toList());
+        } else if (_config.faceDetectorBackend == FaceDetectorBackend.scrfd && _scrfdDetector != null) {
+          detectorCall = _scrfdDetector!.detectFromRawFrame(
+            imageBytes: raw.imageBytes,
+            imageWidth: raw.imageWidth,
+            imageHeight: raw.imageHeight,
+            confidenceThreshold: _config.scrfdConfidenceThreshold,
+            iouThreshold: _config.scrfdIouThreshold,
+          ).then((detections) => detections.map(_IdentityFaceBox.fromScrfd).toList());
+        }
+
+        if (detectorCall != null) {
+          _isSecondaryDetectorRunning = true;
+          unawaited(detectorCall.then((detections) {
+            _isSecondaryDetectorRunning = false;
+            if (_isDisposed) return;
+            _secondaryDetectorRunCount++;
+            _lastSecondaryDetectionCount = detections.length;
+            notifyListeners(); // live proof-of-detection UI (e.g. a backend badge) updates immediately, not just on the next camera frame
+            _IdentityFaceBox? best;
+            if (detections.isNotEmpty) {
+              best = detections.reduce((a, b) =>
+                  a.boundingBox.width * a.boundingBox.height >
+                  b.boundingBox.width * b.boundingBox.height ? a : b);
+            }
+            // Re-check candidacy — by the time this resolves, later frames may
+            // have already updated _bestFrontalScore/_frontalFrames.
+            _recordFrontalFrame(
+              frontality: frontality, raw: raw, face: face, detection: best,
+            );
+          }));
+        } else {
           _recordFrontalFrame(
-            frontality: frontality, raw: raw, face: face, yoloFace: yoloFace,
+            frontality: frontality, raw: raw, face: face, detection: null,
           );
-        }));
+        }
       } else {
         _recordFrontalFrame(
-          frontality: frontality, raw: raw, face: face, yoloFace: null,
+          frontality: frontality, raw: raw, face: face, detection: null,
         );
       }
     }
+
+    // Liveness action detection (blink/turn/smile/etc.) — must never be
+    // delayed by an `await` (see CameraService._isProcessingFrame: it drops
+    // new frames until this whole async function returns, so any await
+    // above this line would throttle camera-frame delivery, and therefore
+    // delay this call, to that await's round-trip rate — e.g. a missed fast
+    // eye-closed→open blink transition). Nothing above this line awaits.
+    _engine?.processFrame(result.faces, quality: result.quality, meshData: result.meshData);
 
     // Fire TFLite anti-spoof inference async; result is stored in _lastTfliteScore
     // and attached to LivenessResult at session end. Guard with _isTfliteRunning
@@ -595,16 +716,16 @@ class LivenessController extends ChangeNotifier {
   }
 
   /// Updates best-frontal / frontal-frame-collection state for one frame.
-  /// Called either synchronously (mlkit backend, or no eligible YOLO run) or
-  /// from the YOLO detection's `.then()` callback — [frontality] is the value
-  /// computed when the frame first arrived, re-checked here against whatever
-  /// _bestFrontalScore/_frontalFrames.length is *now* (which may have moved
-  /// on if this is a deferred YOLO callback).
+  /// Called either synchronously (mlkit backend, or no eligible secondary
+  /// detector run) or from the secondary detector's `.then()` callback —
+  /// [frontality] is the value computed when the frame first arrived,
+  /// re-checked here against whatever _bestFrontalScore/_frontalFrames.length
+  /// is *now* (which may have moved on if this is a deferred callback).
   void _recordFrontalFrame({
     required double frontality,
     required RawFrameData raw,
     required FaceData face,
-    required YoloFaceDetection? yoloFace,
+    required _IdentityFaceBox? detection,
   }) {
     final isCandidateForBest = frontality < _bestFrontalScore;
     final isCandidateForCollection = _config.enableFaceId &&
@@ -614,15 +735,15 @@ class LivenessController extends ChangeNotifier {
       _bestFrontalScore = frontality;
       _bestFrontalFrame = raw;
       _bestFrontalFace  = face;
-      _bestFrontalYolo  = yoloFace;
+      _bestFrontalDetection = detection;
     }
     // Only collect frames where eye landmarks are available — these produce
     // eye-aligned embeddings. Bbox-fallback embeddings are too noisy to average.
-    final hasEyesForBackend = _config.faceDetectorBackend == FaceDetectorBackend.yolov8
-        ? (yoloFace?.hasEyes ?? false)
+    final hasEyesForBackend = _config.faceDetectorBackend != FaceDetectorBackend.mlkit
+        ? (detection?.hasEyes ?? false)
         : (face.leftEyePosition != null && face.rightEyePosition != null);
     if (isCandidateForCollection && hasEyesForBackend) {
-      _frontalFrames.add((raw: raw, face: face, yolo: yoloFace));
+      _frontalFrames.add((raw: raw, face: face, detection: detection));
     }
   }
 
@@ -754,36 +875,54 @@ class LivenessController extends ChangeNotifier {
               final raw  = _bestFrontalFrame ?? _lastRawFrame;
               final face = _bestFrontalFace  ?? _currentFace;
               if (raw != null && face != null) {
-                return [(raw: raw, face: face, yolo: _bestFrontalYolo)];
+                return [(raw: raw, face: face, detection: _bestFrontalDetection)];
               }
-              return <({RawFrameData raw, FaceData face, YoloFaceDetection? yolo})>[];
+              return <({RawFrameData raw, FaceData face, _IdentityFaceBox? detection})>[];
             }();
 
       if (framesToProcess.isNotEmpty) {
         // Compute embedding for each frame in parallel sequence.
-        // When the yolov8 backend supplied a detection for this frame, its
-        // box/eye-points are used instead of ML Kit's — otherwise (default
-        // mlkit backend, or a frame where YOLO found nothing) ML Kit's own
-        // landmarks are used, identical to today's behaviour.
+        // When a secondary backend (yolov8/scrfd) supplied a detection for
+        // this frame, its box/eye-points are used instead of ML Kit's —
+        // otherwise (default mlkit backend, or a frame where the secondary
+        // detector found nothing) ML Kit's own landmarks are used, identical
+        // to today's behaviour.
         final embeddings = <List<double>>[];
         for (final f in framesToProcess) {
-          final box = f.yolo?.boundingBox ?? f.face.boundingBox;
-          final le  = f.yolo?.leftEye;
-          final re  = f.yolo?.rightEye;
+          final box = f.detection?.boundingBox ?? f.face.boundingBox;
+          // The secondary detector's eyes are only used when BOTH are
+          // present — a box-only detection (possible for YOLO when keypoint
+          // visibility is below threshold; never for SCRFD, whose hasEyes is
+          // always true) falls back to ML Kit's own eye landmarks here.
+          final eyesFromDetector = f.detection?.leftEye != null && f.detection?.rightEye != null;
+          final leftEyeX  = eyesFromDetector ? f.detection!.leftEye!.dx  : f.face.leftEyePosition?.x;
+          final leftEyeY  = eyesFromDetector ? f.detection!.leftEye!.dy  : f.face.leftEyePosition?.y;
+          final rightEyeX = eyesFromDetector ? f.detection!.rightEye!.dx : f.face.rightEyePosition?.x;
+          final rightEyeY = eyesFromDetector ? f.detection!.rightEye!.dy : f.face.rightEyePosition?.y;
+          // FacePreprocessor.prepare() only ever uses ONE of {eyes, box} per
+          // call — eyes when both are non-null, box otherwise (see its
+          // `hasEyes` branch). coordinatesInSensorSpace must describe
+          // whichever one will actually be used, not just "a detection
+          // exists": if eyesFromDetector is false, the eye coords above are
+          // ML Kit's rotated-display-space fallback even though f.detection
+          // (and its sensor-space box) is non-null — tagging that case as
+          // sensor-space would skip the un-rotation ML Kit's coordinates
+          // need, silently cropping the wrong region.
+          final hasEyesForCall = leftEyeX != null && leftEyeY != null &&
+              rightEyeX != null && rightEyeY != null;
+          final coordinatesInSensorSpace =
+              hasEyesForCall ? eyesFromDetector : (f.detection != null);
           final emb = await _faceIdentity!.computeEmbedding(
             imageBytes:        f.raw.imageBytes,
             imageWidth:        f.raw.imageWidth,
             imageHeight:       f.raw.imageHeight,
             faceBoundingBox:   box,
             sensorOrientation: f.raw.sensorOrientation,
-            leftEyeX:          le?.dx  ?? f.face.leftEyePosition?.x,
-            leftEyeY:          le?.dy  ?? f.face.leftEyePosition?.y,
-            rightEyeX:         re?.dx  ?? f.face.rightEyePosition?.x,
-            rightEyeY:         re?.dy  ?? f.face.rightEyePosition?.y,
-            // YoloFaceDetectorService samples the raw NV21/BGRA buffer
-            // directly (no rotation applied) — its coordinates are already
-            // in sensor space, unlike ML Kit's rotated-display-space output.
-            coordinatesInSensorSpace: f.yolo != null,
+            leftEyeX:          leftEyeX,
+            leftEyeY:          leftEyeY,
+            rightEyeX:         rightEyeX,
+            rightEyeY:         rightEyeY,
+            coordinatesInSensorSpace: coordinatesInSensorSpace,
           );
           if (emb != null) embeddings.add(emb);
         }
@@ -1104,10 +1243,13 @@ class LivenessController extends ChangeNotifier {
     _frontalFrames.clear();
     _bestFrontalFrame            = null;
     _bestFrontalFace             = null;
-    _bestFrontalYolo             = null;
+    _bestFrontalDetection        = null;
     _bestFrontalScore            = double.infinity;
     _yoloModelDownloadProgress   = null;
-    _isYoloRunning                = false;
+    _scrfdModelDownloadProgress  = null;
+    _isSecondaryDetectorRunning  = false;
+    _secondaryDetectorRunCount   = 0;
+    _lastSecondaryDetectionCount = null;
     _lastTfliteScore             = null;
     _isTfliteRunning             = false;
     _tfliteFuture                = null;
@@ -1146,6 +1288,7 @@ class LivenessController extends ChangeNotifier {
     _videoReplay?.dispose();
     _faceIdentity?.dispose();
     _yoloDetector?.dispose();
+    _scrfdDetector?.dispose();
     _engine?.dispose();
     super.dispose();
   }

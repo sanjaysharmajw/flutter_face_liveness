@@ -73,9 +73,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // Identity-pipeline detector backend toggle — see LivenessConfig.faceDetectorBackend.
   // Only affects the Face ID/identity embedding pipeline; liveness actions
   // (blink/smile/turn) always use ML Kit regardless of this setting.
-  bool _useYolo = false;
-  FaceDetectorBackend get _detectorBackend =>
-      _useYolo ? FaceDetectorBackend.yolov8 : FaceDetectorBackend.mlkit;
+  FaceDetectorBackend _detectorBackend = FaceDetectorBackend.mlkit;
 
   @override
   void initState() {
@@ -158,8 +156,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: _DetectorBackendToggle(
-                    useYolo: _useYolo,
-                    onChanged: (v) => setState(() => _useYolo = v),
+                    backend: _detectorBackend,
+                    onChanged: (v) => setState(() => _detectorBackend = v),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -1083,9 +1081,34 @@ class _PerformanceModeToggle extends StatelessWidget {
 /// / YOLOv8n-face choice for the identity/embedding pipeline. Only relevant
 /// when Face ID is enabled; liveness actions always use ML Kit either way.
 class _DetectorBackendToggle extends StatelessWidget {
-  const _DetectorBackendToggle({required this.useYolo, required this.onChanged});
-  final bool useYolo;
-  final ValueChanged<bool> onChanged;
+  const _DetectorBackendToggle({required this.backend, required this.onChanged});
+  final FaceDetectorBackend backend;
+  final ValueChanged<FaceDetectorBackend> onChanged;
+
+  static const _labels = {
+    FaceDetectorBackend.mlkit:  'ML Kit',
+    FaceDetectorBackend.yolov8: 'YOLOv8',
+    FaceDetectorBackend.scrfd:  'SCRFD',
+  };
+  static const _icons = {
+    FaceDetectorBackend.mlkit:  Icons.face_retouching_natural_rounded,
+    FaceDetectorBackend.yolov8: Icons.blur_on_rounded,
+    FaceDetectorBackend.scrfd:  Icons.grain_rounded,
+  };
+  static const _subtitles = {
+    FaceDetectorBackend.mlkit:
+        'Default — reuses ML Kit landmarks, no extra download',
+    FaceDetectorBackend.yolov8:
+        'Only affects Register/Verify Face presets below — downloads model on first use. No effect on Standard/Extended/TFLite presets.',
+    FaceDetectorBackend.scrfd:
+        'Only affects Register/Verify Face presets below — InsightFace anchor-based detector, downloads on first use. No effect on Standard/Extended/TFLite presets.',
+  };
+
+  Color get _accent => switch (backend) {
+        FaceDetectorBackend.mlkit  => _primary,
+        FaceDetectorBackend.yolov8 => _purple,
+        FaceDetectorBackend.scrfd  => const Color(0xFFEC7A3D),
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -1096,36 +1119,60 @@ class _DetectorBackendToggle extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            useYolo ? Icons.blur_on_rounded : Icons.face_retouching_natural_rounded,
-            size: 18,
-            color: useYolo ? _purple : _primary,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  useYolo ? 'YOLOv8n-face Backend' : 'ML Kit Backend',
+          Row(
+            children: [
+              Icon(_icons[backend], size: 18, color: _accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${_labels[backend]} Backend',
                   style: const TextStyle(
                     color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w700),
                 ),
-                Text(
-                  useYolo
-                      ? 'Face ID identity pipeline only — downloads model on first use'
-                      : 'Default — reuses ML Kit landmarks, no extra download',
-                  style: const TextStyle(color: _textSecondary, fontSize: 11),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          Switch(
-            value: useYolo,
-            onChanged: onChanged,
-            activeTrackColor: _purple,
+          const SizedBox(height: 4),
+          Text(
+            _subtitles[backend]!,
+            style: const TextStyle(color: _textSecondary, fontSize: 11),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: FaceDetectorBackend.values.map((b) {
+              final selected = b == backend;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => onChanged(b),
+                  child: Container(
+                    margin: EdgeInsets.only(
+                        right: b != FaceDetectorBackend.values.last ? 8 : 0),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: selected ? _accent.withValues(alpha: 0.14) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: selected
+                            ? _accent.withValues(alpha: 0.5)
+                            : Colors.black.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Text(
+                      _labels[b]!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: selected ? _accent : _textSecondary,
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
           ),
         ],
       ),
