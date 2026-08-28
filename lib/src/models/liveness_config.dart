@@ -12,7 +12,7 @@ import 'face_detector_backend.dart';
 class LivenessConfig {
   const LivenessConfig({
     // ── Session ─────────────────────────────────────────────────────────
-    this.sessionTimeoutMs = 60000,
+    this.sessionTimeoutMs = 90000,
     this.randomizeActions = true,
 
     // ── Camera ───────────────────────────────────────────────────────────
@@ -27,8 +27,8 @@ class LivenessConfig {
     // ── Frame quality ────────────────────────────────────────────────────
     this.enableBrightnessCheck = true,
     this.enableBlurDetection = true,
-    this.brightnessMin = 0.12,
-    this.brightnessMax = 0.92,
+    this.brightnessMin = 0.08,
+    this.brightnessMax = 0.95,
     this.blurThreshold = 80.0,
 
     // ── TFLite (optional) ────────────────────────────────────────────────
@@ -63,10 +63,10 @@ class LivenessConfig {
     this.minEmbeddingQuality = 0.50,
     this.faceDetectorBackend = FaceDetectorBackend.mlkit,
     this.yoloModelUrl,
-    this.yoloConfidenceThreshold = 0.5,
+    this.yoloConfidenceThreshold = 0.4,
     this.yoloIouThreshold = 0.45,
     this.scrfdModelUrl,
-    this.scrfdConfidenceThreshold = 0.5,
+    this.scrfdConfidenceThreshold = 0.4,
     this.scrfdIouThreshold = 0.45,
 
     // ── Best-frontal capture ────────────────────────────────────────────

@@ -1,3 +1,19 @@
+## 3.7.0
+
+### New Features
+
+- **Passive Face ID — no challenge actions required** — `LivenessConfig`/`FlutterFaceLiveness` accept `actions: const []`. Previously an empty action list never completed (it just ran until `sessionTimeoutMs` and failed with "Session timed out"), since `LivenessEngine` only ever completed via the last required action finishing. Now a zero-action session completes as soon as a stable, quality-passed, anti-spoof-passed frontal face is held for a short debounced window (10 consecutive valid frames, ≈0.5s at 20fps — long enough for `LivenessController`'s frontal-frame collection to gather a few samples for a well-averaged Face ID embedding, short enough to feel instant). Still gated by every existing check (brightness, blur, face geometry, the 9-signal anti-spoof heuristic) — this removes the active gesture requirement, not the liveness/spoof checks. Shows `DetectionStatus.ready` ("Hold still…") during the debounce window; the progress bar (which divides by `totalActions`) is hidden automatically for a 0-action session, same as before.
+  - Example app: two new presets, **"Register Face — No Actions"** and **"Verify Face — No Actions"** — same `FaceIdMode.registrationOnly`/`.verificationOnly` behavior as the existing Register/Verify Face presets, minus the blink/turn/look/smile/mouth challenge.
+
+### Defaults tuned for fewer missed detections
+
+User-reported: occasional per-frame detection misses across all three backends (ML Kit/YOLOv8/SCRFD) — normal in isolation (the session tries many frames, not just one), but worth making less likely by default:
+- `yoloConfidenceThreshold` / `scrfdConfidenceThreshold`: `0.5` → `0.4` — accepts more marginal detections; NMS + largest-box selection already guard against the resulting extra false-positive risk.
+- `brightnessMin` / `brightnessMax`: `0.12`/`0.92` → `0.08`/`0.95` — wider acceptable lighting range before a frame is rejected as too dark/bright.
+- `sessionTimeoutMs`: `60000` → `90000` — more time (and therefore more attempted frames) per session before a timeout failure.
+
+These are default-value changes only — override any of them via `LivenessConfig` if the previous stricter values suited your use case better.
+
 ## 3.6.0
 
 ### New Features
@@ -12,6 +28,7 @@
 
 - **Live confirmation that `yolov8`/`scrfd` are actually detecting** — `YOLOv8n-face`/`SCRFD-2.5G-KPS` results never reach the on-screen face-tracking oval (that always reflects ML Kit, which drives liveness actions regardless of backend), so there was previously no visible proof either backend was running at all. `LivenessController` gains `isSecondaryDetectorActive`, `secondaryDetectorRunCount`, and `lastSecondaryDetectionCount`; `FlutterFaceLiveness` shows a small badge (top-right, only when a secondary backend is active) reading e.g. "SCRFD-2.5G-KPS · face detected (4x)" that updates live as the backend runs.
 - **Example app: clarified that the backend selector only affects Face ID presets** — the YOLOv8/SCRFD subtitle text was easy to miss; toggling the backend and then launching Standard/Extended/TFLite (none of which set `enableFaceId: true`) looked like the backend had no effect, since it genuinely doesn't apply there. Subtitles now say so explicitly, pointing at Register/Verify Face as the presets to test with.
+- **Documented: register and verify must use the same `faceDetectorBackend`** — user-reported: registering with one backend then verifying with another reliably fails with "Face not recognized," even for the correct person. Root cause isn't a bug in any single backend — each detector computes eye-alignment keypoints slightly differently, so the embedding shifts a bit depending on which backend produced it, which can push cosine similarity below `faceIdSimilarityThreshold`. Added a prominent warning to the README's Face Detector Backends section and a caption under the example app's backend selector; the backend choice is meant to be a fixed app/deployment setting, not something toggled per user.
 
 ### Bug Fixes
 

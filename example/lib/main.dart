@@ -236,6 +236,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 14),
                       _ChallengeCard(
+                        icon: Icons.person_outline_rounded,
+                        title: 'Register Face — No Actions',
+                        subtitle: 'One-time enrolment · Just hold still, no challenge',
+                        accentColor: _cyan,
+                        onTap: () => _launchRegisterFaceNoActions(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.badge_outlined,
+                        title: 'Verify Face — No Actions',
+                        subtitle: 'Login-only · Just hold still, no challenge',
+                        accentColor: _purple,
+                        onTap: () => _launchVerifyFaceNoActions(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
                         icon: Icons.psychology_outlined,
                         title: 'With TFLite Anti-Spoof',
                         subtitle: 'TFLite anti-spoof + video replay detection',
@@ -383,6 +399,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
     await Navigator.of(ctx).push(_fade(LivenessScreen(
       actions: const [LivenessAction.turnLeft, LivenessAction.turnRight],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.verificationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
+  }
+
+  /// Same as [_launchRegisterFace] but with an empty action list — no
+  /// blink/turn/look/smile/mouth challenge at all. The session completes
+  /// as soon as a stable, quality-passed, anti-spoof-passed frontal face is
+  /// held for a short debounced window (see LivenessEngine's passive-mode
+  /// handling of `actions: const []`), instead of waiting for an active
+  /// gesture. Still gated by the same anti-spoof heuristics as every other
+  /// preset — this removes the *challenge*, not the liveness checks.
+  Future<void> _launchRegisterFaceNoActions(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.registrationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
+    if (mounted) await _loadFaceIds();
+  }
+
+  /// Same as [_launchVerifyFace] but with an empty action list — see
+  /// [_launchRegisterFaceNoActions] for what "no actions" means here.
+  Future<void> _launchVerifyFaceNoActions(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [],
       enableFaceId: true,
       faceIdMode: FaceIdMode.verificationOnly,
       performanceMode: _performanceMode,
@@ -1173,6 +1231,26 @@ class _DetectorBackendToggle extends StatelessWidget {
                 ),
               );
             }).toList(),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline_rounded, size: 13, color: Colors.amber),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Register and verify with the SAME backend — switching it in '
+                  'between can make a real match fail, since each detector '
+                  'computes eye-alignment slightly differently.',
+                  style: TextStyle(
+                    color: _textSecondary.withValues(alpha: 0.9),
+                    fontSize: 10.5,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

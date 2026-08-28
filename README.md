@@ -1,6 +1,6 @@
 # flutter_face_liveness
 
-[![pub version](https://img.shields.io/badge/pub-3.6.0-blue)](https://pub.dev/packages/flutter_face_liveness)
+[![pub version](https://img.shields.io/badge/pub-3.7.0-blue)](https://pub.dev/packages/flutter_face_liveness)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-☕-yellow)](https://buymeacoffee.com/sanjaysharmajw)
@@ -9,12 +9,12 @@
 
 Production-ready AI-powered Flutter SDK for **real-time face liveness detection, replay attack prevention, and persistent face identity** — powered by Google ML Kit, TensorFlow Lite, and optional YOLOv8n-face / SCRFD-2.5G-KPS detector backends. All processing runs **entirely on-device** with zero server calls (except one-time model downloads).
 
-> ### 🆕 New in v3.6.0 — SCRFD-2.5G-KPS detector backend
-> `FaceDetectorBackend` gains a third option, `scrfd` — InsightFace's SCRFD-2.5G-KPS anchor-based detector, alongside `mlkit` (default) and `yolov8`. Same opt-in, identity-pipeline-only role and the same non-blocking fire-and-forget execution guarantee as `yolov8` (see [Execution model](#face-detector-backends-ml-kit--yolov8--scrfd)). Model auto-downloads on first use — no setup required. The example app's backend toggle is now a 3-way selector, and a small on-screen badge confirms whichever backend is active is really detecting (its result never reaches the face-tracking oval, which always reflects ML Kit).
+> ### 🆕 New in v3.7.0 — Passive Face ID (no challenge actions)
+> `actions: const []` now works — a Face ID session completes as soon as a stable, quality-passed, anti-spoof-passed frontal face is held for a short moment, no blink/turn/look/smile/mouth challenge required. Still gated by every existing check (brightness, blur, geometry, the anti-spoof heuristic) — just no active gesture. Example app gets two new presets: **"Register Face — No Actions"** / **"Verify Face — No Actions"**. Also widens a few defaults to reduce occasional missed detections: `yoloConfidenceThreshold`/`scrfdConfidenceThreshold` `0.5→0.4`, `brightnessMin`/`brightnessMax` `0.12/0.92→0.08/0.95`, `sessionTimeoutMs` `60000→90000`.
 >
-> **v3.5.0** fixed blink/turn/smile detection becoming slow or unresponsive with `faceDetectorBackend: yolov8` (detection is now fully fire-and-forget). **v3.4.0** added `LivenessConfig.faceDetectorPerformanceMode` (default `.accurate`, better off-angle tracking) and `enableBestFrontalCapture` (auto-captured JPEG on success). **v3.3.0** added `FaceDetectorBackend.yolov8` (YOLOv8n-face TFLite) as an alternative to ML Kit for the identity/embedding pipeline, and [`FaceCaptureService`](#face-capture--photo-enrollment--verification) for enrolling/verifying from a single captured photo.
+> **v3.6.0** added `FaceDetectorBackend.scrfd` (InsightFace SCRFD-2.5G-KPS) as a third identity-pipeline detector option, a live on-screen badge confirming a secondary backend is actually detecting, and fixed several bugs (see [Changelog](#changelog)). **v3.5.0** fixed blink/turn/smile detection becoming slow or unresponsive with `faceDetectorBackend: yolov8`. **v3.4.0** added `LivenessConfig.faceDetectorPerformanceMode` and `enableBestFrontalCapture`. **v3.3.0** added `FaceDetectorBackend.yolov8` and [`FaceCaptureService`](#face-capture--photo-enrollment--verification).
 >
-> → [Face Detector Backends (ML Kit / YOLOv8 / SCRFD)](#face-detector-backends-ml-kit--yolov8--scrfd)
+> → [Face Detector Backends (ML Kit / YOLOv8 / SCRFD)](#face-detector-backends-ml-kit--yolov8--scrfd) · [Liveness Actions](#liveness-actions)
 
 ---
 
@@ -226,7 +226,7 @@ FlutterFaceLiveness(
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^3.6.0
+  flutter_face_liveness: ^3.7.0
 ```
 
 ### 2. Platform permissions
@@ -397,6 +397,8 @@ service.dispose();
 ## Face Detector Backends (ML Kit / YOLOv8 / SCRFD)
 
 > **Scope:** this setting only affects which detector supplies the face box + eye keypoints fed into the **identity/embedding pipeline** (`enableFaceId: true`). Liveness actions (blink, smile, head turns) always run on ML Kit, regardless of this setting — only ML Kit exposes the eye-open/smiling classification they need. Embedding and matching (FaceNet + gallery search) are identical either way; the backend choice never affects `FaceIdMode` behaviour or thresholds.
+>
+> **⚠️ Keep the backend consistent for a given person.** Each detector computes eye-alignment keypoints slightly differently, so the resulting embedding shifts a bit depending on which backend produced it — registering with one backend and verifying with a different one can push the cosine similarity below `faceIdSimilarityThreshold` and report `notFound`/"Face not recognized" even for the correct person, despite embedding/matching logic itself being identical. Pick one backend for your app (or per-deployment) and keep it fixed for the lifetime of a person's registration — don't let end users toggle it. The example app's 3-way selector is a **developer comparison tool**; if you test Register/Verify Face across multiple backends, re-register between switches.
 
 ```dart
 enum FaceDetectorBackend { mlkit, yolov8, scrfd }
@@ -433,7 +435,7 @@ FlutterFaceLiveness(
   config: LivenessConfig(
     enableFaceId: true,
     faceDetectorBackend: FaceDetectorBackend.scrfd, // or .yolov8
-    scrfdConfidenceThreshold: 0.5,   // min detection confidence
+    scrfdConfidenceThreshold: 0.4,   // min detection confidence
     scrfdIouThreshold: 0.45,         // NMS overlap threshold
   ),
   onSuccess: (result) => print('Face ID: ${result.faceId}'),
@@ -573,7 +575,7 @@ See the example app's **"Best-Frontal Capture"** preset for a working demo (resu
 ```dart
 LivenessConfig({
   // Session
-  int    sessionTimeoutMs  = 60000,
+  int    sessionTimeoutMs  = 90000,
   bool   randomizeActions  = true,
 
   // Camera
@@ -587,8 +589,8 @@ LivenessConfig({
 
   // Frame quality
   bool   enableBrightnessCheck = true,
-  double brightnessMin         = 0.12,
-  double brightnessMax         = 0.92,
+  double brightnessMin         = 0.08,
+  double brightnessMax         = 0.95,
   bool   enableBlurDetection   = true,
   double blurThreshold         = 80.0,
   bool   enableDuplicateFrameDetection = true,
@@ -609,10 +611,10 @@ LivenessConfig({
   double     minEmbeddingQuality               = 0.50,
   FaceDetectorBackend faceDetectorBackend      = FaceDetectorBackend.mlkit,
   String?    yoloModelUrl                      = null,
-  double     yoloConfidenceThreshold           = 0.5,
+  double     yoloConfidenceThreshold           = 0.4,
   double     yoloIouThreshold                  = 0.45,
   String?    scrfdModelUrl                     = null,
-  double     scrfdConfidenceThreshold          = 0.5,
+  double     scrfdConfidenceThreshold          = 0.4,
   double     scrfdIouThreshold                 = 0.45,
   bool       enableBestFrontalCapture          = false,
   int        bestFrontalJpegQuality            = 85,
@@ -641,7 +643,7 @@ LivenessConfig({
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `sessionTimeoutMs` | `int` | `60000` | Auto-fail after this many ms |
+| `sessionTimeoutMs` | `int` | `90000` | Auto-fail after this many ms |
 | `randomizeActions` | `bool` | `true` | Fisher-Yates shuffle per session |
 | `cameraResolution` | `ResolutionPreset` | `high` | `medium` reduces CPU on low-end devices |
 | `targetFps` | `int` | `20` | Frame processing rate (1–30 fps) |
@@ -649,8 +651,8 @@ LivenessConfig({
 | `enableAntiSpoof` | `bool` | `true` | 9-signal composite heuristic |
 | `antiSpoofThreshold` | `double` | `0.45` | Minimum composite score to pass |
 | `enableBrightnessCheck` | `bool` | `true` | Block too-dark or overexposed frames |
-| `brightnessMin` | `double` | `0.12` | BT.601 luminance below this = dark. 6-frame debounce |
-| `brightnessMax` | `double` | `0.92` | Luminance above this = overexposed. Same debounce |
+| `brightnessMin` | `double` | `0.08` | BT.601 luminance below this = dark. 6-frame debounce |
+| `brightnessMax` | `double` | `0.95` | Luminance above this = overexposed. Same debounce |
 | `enableBlurDetection` | `bool` | `true` | Block blurry frames |
 | `blurThreshold` | `double` | `80.0` | Y-plane variance below this = blurry |
 | `enableDuplicateFrameDetection` | `bool` | `true` | FNV-1a sliding-window exact-duplicate detection |
@@ -665,10 +667,10 @@ LivenessConfig({
 | `minEmbeddingQuality` | `double` | `0.50` | Discard embeddings below this quality score before averaging |
 | `faceDetectorBackend` | `FaceDetectorBackend` | `mlkit` | `mlkit` (reuse ML Kit landmarks, no extra cost), `yolov8`, or `scrfd` (second model, identity-eligible frames only) |
 | `yoloModelUrl` | `String?` | `null` | Override download URL for the YOLOv8n-face model. `null` = `YoloModelDownloader.bundledModelUrl` |
-| `yoloConfidenceThreshold` | `double` | `0.5` | Minimum detection confidence for a YOLOv8n-face box to be kept |
+| `yoloConfidenceThreshold` | `double` | `0.4` | Minimum detection confidence for a YOLOv8n-face box to be kept |
 | `yoloIouThreshold` | `double` | `0.45` | IoU threshold for YOLOv8n-face non-max suppression |
 | `scrfdModelUrl` | `String?` | `null` | Override download URL for the SCRFD-2.5G-KPS model. `null` = `ScrfdModelDownloader.bundledModelUrl` |
-| `scrfdConfidenceThreshold` | `double` | `0.5` | Minimum detection confidence for a SCRFD-2.5G-KPS box to be kept |
+| `scrfdConfidenceThreshold` | `double` | `0.4` | Minimum detection confidence for a SCRFD-2.5G-KPS box to be kept |
 | `scrfdIouThreshold` | `double` | `0.45` | IoU threshold for SCRFD-2.5G-KPS non-max suppression |
 | `enableBestFrontalCapture` | `bool` | `false` | Auto-capture the most-frontal frame as an upright JPEG on success — see `LivenessResult.bestFrontalImageBytes` |
 | `bestFrontalJpegQuality` | `int` | `85` | JPEG quality (0–100) for the best-frontal capture |
@@ -717,7 +719,14 @@ actions: [LivenessAction.blink, LivenessAction.turnLeft,
 // Full challenge
 actions: [LivenessAction.blink, LivenessAction.turnLeft, LivenessAction.turnRight,
           LivenessAction.lookUp, LivenessAction.openMouth]
+
+// Passive — no challenge action, just hold still (v3.7.0+)
+actions: []
 ```
+
+### Passive mode — `actions: []`
+
+An empty action list is valid: the session completes as soon as a stable, quality-passed, anti-spoof-passed frontal face is held for a short debounced window (~0.5s), instead of waiting for blink/turn/look/smile/mouth. Every other check still runs — brightness, blur, face geometry, the 9-signal anti-spoof heuristic — this removes the active gesture requirement only, not the liveness/spoof checks. Useful for lower-friction Face ID enrolment/login where an active challenge isn't needed. The step progress bar is automatically hidden for a 0-action session.
 
 ---
 
@@ -959,8 +968,8 @@ The SDK checks frame brightness on every camera frame using BT.601 platform-corr
 
 | Condition | Status triggered | Threshold |
 |-----------|-----------------|-----------|
-| Too dark | `DetectionStatus.lowLight` | Luminance < `brightnessMin` (default `0.12`) |
-| Too bright / overexposed | `DetectionStatus.overExposed` | Luminance > `brightnessMax` (default `0.92`) |
+| Too dark | `DetectionStatus.lowLight` | Luminance < `brightnessMin` (default `0.08`) |
+| Too bright / overexposed | `DetectionStatus.overExposed` | Luminance > `brightnessMax` (default `0.95`) |
 
 Both statuses use a **6-frame debounce** — the camera must report bad brightness for 6 consecutive frames before the status changes. This absorbs auto-exposure settling time when the user first points the camera.
 
@@ -1029,7 +1038,7 @@ cd example
 flutter run
 ```
 
-Nine challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · Verify Face — Head Turn Only · With TFLite Anti-Spoof · Best-Frontal Capture.
+Eleven challenge presets: Standard · Extended · Full · Face ID Auto · Register Face · Verify Face · Verify Face — Head Turn Only · Register Face — No Actions · Verify Face — No Actions · With TFLite Anti-Spoof · Best-Frontal Capture.
 
 Two home-screen toggles apply to every preset:
 - **Accurate / Fast Detection** — `LivenessConfig.faceDetectorPerformanceMode`
@@ -1046,9 +1055,9 @@ Two home-screen toggles apply to every preset:
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
-Latest: **v3.6.0** — Adds `FaceDetectorBackend.scrfd` (InsightFace SCRFD-2.5G-KPS) as a third identity-pipeline detector option alongside `mlkit`/`yolov8`, with the same non-blocking fire-and-forget execution guarantee; example-app backend toggle is now a 3-way selector, plus a live on-screen badge confirming the selected backend is actually detecting (`isSecondaryDetectorActive`/`secondaryDetectorRunCount`/`lastSecondaryDetectionCount`). Also fixes: the loading screen not showing download progress for the `yolov8`/`scrfd` models, a coordinate-space bug that could corrupt YOLOv8 identity embeddings on box-only detections, a rotated `bestFrontalImageBytes` JPEG on common Android sensor orientations, and an identity-bookkeeping race on the final liveness-action frame.
+Latest: **v3.7.0** — `actions: []` now works for a passive, no-challenge Face ID session (hold-still completion, still gated by every quality/anti-spoof check); two new example-app presets (Register/Verify Face — No Actions); widened `yoloConfidenceThreshold`/`scrfdConfidenceThreshold`, `brightnessMin`/`brightnessMax`, and `sessionTimeoutMs` defaults to reduce occasional missed detections.
 
-Previous: **v3.5.0** — Fixes blink/turn/smile detection being throttled by `faceDetectorBackend: yolov8` (YOLO detection is now fully fire-and-forget); example-app toggle for `faceDetectorBackend`; widened outdated dependency constraints.
+Previous: **v3.6.0** — Added `FaceDetectorBackend.scrfd` (InsightFace SCRFD-2.5G-KPS) as a third identity-pipeline detector option alongside `mlkit`/`yolov8`, a live on-screen badge confirming the selected backend is actually detecting, and fixed several bugs (coordinate-space, best-frontal JPEG rotation, download-progress display, an over-eager inference-dispatch regression).
 
 ---
 
