@@ -1,3 +1,108 @@
+## 3.7.1
+
+### Bug Fixes
+
+- **`onSuccess`/`onFailed` never fired when `enableBestFrontalCapture: true`** — the session reached "VERIFIED" on screen, but neither callback was ever called. The best-frontal JPEG was encoded with an inline `Isolate.run(() => ...)` closure inside `LivenessController._onEngineComplete`; because other closures in that method reference instance fields, the Dart VM captured `this` (the whole controller, including camera/ML Kit/TFLite handles) into the shared closure context, and sending it to the background isolate threw an "unsendable object" error. `_onEngineComplete` runs unawaited, so the error was silently swallowed before the callbacks. Encoding now goes through a top-level `encodeFrameToJpegInBackground()` helper that only sends the frame and quality, and the capture is best-effort — if encoding fails for any reason, `onSuccess` still fires (with `bestFrontalImageBytes` left `null`).
+  - Added `test/frame_encoder_test.dart` — reproduces the original failure and guards the fix.
+
+### Dependencies
+
+- `google_mlkit_face_detection` `^0.14.0` → `^0.15.1`
+- `google_mlkit_face_mesh_detection` `^0.5.0` → `^0.6.1`
+- Removed the unused `permission_handler` dependency — the package never imported it. Apps that request camera permission with it (as the example app does) should add it to their own `pubspec.yaml`.
+- Shortened the package description to fit pub.dev's 180-character limit.
+
+## 3.7.0
+
+### New Features
+
+- **Passive Face ID — no challenge actions required** — `LivenessConfig`/`FlutterFaceLiveness` accept `actions: const []`. Previously an empty action list never completed (it just ran until `sessionTimeoutMs` and failed with "Session timed out"), since `LivenessEngine` only ever completed via the last required action finishing. Now a zero-action session completes as soon as a stable, quality-passed, anti-spoof-passed frontal face is held for a short debounced window (10 consecutive valid frames, ≈0.5s at 20fps — long enough for `LivenessController`'s frontal-frame collection to gather a few samples for a well-averaged Face ID embedding, short enough to feel instant). Still gated by every existing check (brightness, blur, face geometry, the 9-signal anti-spoof heuristic) — this removes the active gesture requirement, not the liveness/spoof checks. Shows `DetectionStatus.ready` ("Hold still…") during the debounce window; the progress bar (which divides by `totalActions`) is hidden automatically for a 0-action session, same as before.
+  - Example app: two new presets, **"Register Face — No Actions"** and **"Verify Face — No Actions"** — same `FaceIdMode.registrationOnly`/`.verificationOnly` behavior as the existing Register/Verify Face presets, minus the blink/turn/look/smile/mouth challenge.
+
+### Defaults tuned for fewer missed detections
+
+User-reported: occasional per-frame detection misses across all three backends (ML Kit/YOLOv8/SCRFD) — normal in isolation (the session tries many frames, not just one), but worth making less likely by default:
+- `yoloConfidenceThreshold` / `scrfdConfidenceThreshold`: `0.5` → `0.4` — accepts more marginal detections; NMS + largest-box selection already guard against the resulting extra false-positive risk.
+- `brightnessMin` / `brightnessMax`: `0.12`/`0.92` → `0.08`/`0.95` — wider acceptable lighting range before a frame is rejected as too dark/bright.
+- `sessionTimeoutMs`: `60000` → `90000` — more time (and therefore more attempted frames) per session before a timeout failure.
+
+These are default-value changes only — override any of them via `LivenessConfig` if the previous stricter values suited your use case better.
+
+## 3.6.0
+
+### New Features
+
+- **SCRFD-2.5G-KPS detection backend for face identity** — `FaceDetectorBackend` gains a third value, `scrfd`, alongside `mlkit` (default) and `yolov8`. Uses InsightFace's SCRFD-2.5G-KPS (anchor-based, FCOS-style distance regression, 3 detection heads at strides 8/16/32) instead of ML Kit's own landmarks for the face box + eye keypoints fed into `FaceEmbeddingModel` — generally more accurate than YOLOv8n-face at small/angled faces, similar extra per-frame inference cost. Liveness actions (blink/smile/head-pose) always use ML Kit regardless of this setting, unchanged from the `yolov8` backend's behavior. Configured via `LivenessConfig.faceDetectorBackend`, `scrfdModelUrl`, `scrfdConfidenceThreshold`, `scrfdIouThreshold`.
+  - `ScrfdFaceDetectorService` / `ScrfdFaceDetection` — same isolate-worker architecture as `YoloFaceDetectorService` (inference never blocks the caller's isolate). Decode differs from YOLO's single unified output tensor: SCRFD emits 9 raw tensors (`score`/`bbox`/`kps` × 3 strides), auto-classified at load time by channel count (1/4/10) and anchor count — never hardcoded by tensor index — then decoded with SCRFD's own `distance2bbox`/`distance2kps` math (no `+0.5` cell-center offset, distances pre-multiplied by stride) and greedy NMS. Preprocessing also differs from YOLO: top-left-aligned zero-padded resize (not centered letterboxing) and `(pixel - 127.5) / 128.0` normalization (not `pixel / 255`), matching InsightFace's own reference preprocessing exactly.
+  - `ScrfdModelDownloader` — same cache-on-first-use pattern as `YoloModelDownloader`/`FaceModelDownloader`.
+  - `ScrfdModelDownloader.bundledModelUrl` points to a hosted `scrfd_2.5g_bnkps_float32.tflite` release asset, converted from the verified official InsightFace ONNX export (a third-party GitHub-LFS mirror was used as the source — InsightFace's own release bundles only ship the 500M variant, not 2.5G — verified by parsing the ONNX graph's input/output tensor names and shapes before conversion) via `onnx2tf`. Works out of the box, no setup required. Override `LivenessConfig.scrfdModelUrl` only if you want to swap in a custom model.
+  - The `LivenessController._processFrame()` fire-and-forget dispatch (unawaited, guarded by a busy flag so a slow model never throttles camera-frame delivery — see the 3.5.0 blink-detection fix below) is now backend-generic: a small internal `_IdentityFaceBox` adapter normalises either detector's output before the shared frontal-frame-tracking/embedding code runs, so `scrfd` gets the same non-blocking guarantee as `yolov8` with no separate bug class to reintroduce.
+
+- **Example app: SCRFD backend option** — the existing ML Kit/YOLOv8 toggle is now a 3-way segmented selector (ML Kit / YOLOv8 / SCRFD) so all three can be compared live, applied to every Face ID preset.
+
+- **Live confirmation that `yolov8`/`scrfd` are actually detecting** — `YOLOv8n-face`/`SCRFD-2.5G-KPS` results never reach the on-screen face-tracking oval (that always reflects ML Kit, which drives liveness actions regardless of backend), so there was previously no visible proof either backend was running at all. `LivenessController` gains `isSecondaryDetectorActive`, `secondaryDetectorRunCount`, and `lastSecondaryDetectionCount`; `FlutterFaceLiveness` shows a small badge (top-right, only when a secondary backend is active) reading e.g. "SCRFD-2.5G-KPS · face detected (4x)" that updates live as the backend runs.
+- **Example app: clarified that the backend selector only affects Face ID presets** — the YOLOv8/SCRFD subtitle text was easy to miss; toggling the backend and then launching Standard/Extended/TFLite (none of which set `enableFaceId: true`) looked like the backend had no effect, since it genuinely doesn't apply there. Subtitles now say so explicitly, pointing at Register/Verify Face as the presets to test with.
+- **Documented: register and verify must use the same `faceDetectorBackend`** — user-reported: registering with one backend then verifying with another reliably fails with "Face not recognized," even for the correct person. Root cause isn't a bug in any single backend — each detector computes eye-alignment keypoints slightly differently, so the embedding shifts a bit depending on which backend produced it, which can push cosine similarity below `faceIdSimilarityThreshold`. Added a prominent warning to the README's Face Detector Backends section and a caption under the example app's backend selector; the backend choice is meant to be a fixed app/deployment setting, not something toggled per user.
+
+### Bug Fixes
+
+- **`FlutterFaceLiveness`'s loading screen showed no download progress for the `yolov8`/`scrfd` backends** — `_loadingView()` only read `tfliteModelDownloadProgress`/`faceIdModelDownloadProgress`; the YOLOv8n-face/SCRFD-2.5G-KPS model downloads (which, like every other model, complete before the camera opens — see `LivenessController.initialize()`) ran with no visible percentage, just a spinner and "Starting camera…", making a multi-second first-time download look stuck. Now shows a labelled progress bar for whichever model is currently downloading (Anti-Spoof / Face ID / YOLOv8n-face / SCRFD-2.5G-KPS), same as the existing models.
+- **`coordinatesInSensorSpace` could be set incorrectly when a YOLOv8 detection had a box but no confident eye keypoints** — `_onEngineComplete()` fell back to ML Kit's own eye landmarks (rotated display-space) in that case but still tagged the coordinates as sensor-space (since a detection object was present), skipping the un-rotation ML Kit's coordinates need — silently cropping the wrong region for the identity embedding. Fixed by deriving the flag from which source actually supplies the coordinates that get used, not merely whether a detection exists. (SCRFD is unaffected — its `hasEyes` is always true.)
+- **`FaceCaptureService.initialize()` had no error isolation for YOLOv8/SCRFD model loads** — unlike `LivenessController`, a failed download/load threw an uncaught exception instead of the documented silent fallback, and a subsequent `captureAndIdentify()` call with a `null` detector reported the misleading `'No face detected'` instead of the real cause. Both fixed: `initialize()` now catches load failures per-backend, and `captureAndIdentify()` reports a clear `'... detector unavailable — model failed to load or download'` rejection when relevant.
+- **`enableBestFrontalCapture`'s JPEG was rotated 180° off from correct on the common Android `sensorOrientation` values (90/270)** — `frame_encoder.dart` rotated raw sensor pixels by `sensorOrientation` directly, but that value's 90°/270° cases need to be swapped relative to `copyRotate`'s angle — verified by deriving the correct transform as the algebraic inverse of this codebase's own already-tested `FacePreprocessor._landmarkToSensor`, composed with the `image` package's actual per-angle pixel mapping.
+- **`faceDetectorBackend: yolov8`/`scrfd` dispatched an inference request on every qualifying camera frame (~20-30fps), not just identity-eligible candidate frames (~7-15 per session)** — a regression introduced while generalizing the fire-and-forget dispatch for the `scrfd` backend: the detector's async call was constructed (which, being an async function, starts executing — sending the isolate request — immediately, before its first `await`) *before* the candidacy/busy-flag guard was checked, rather than inside it. Fixed by moving construction back inside the guard, restoring the original throttling.
+- **`ScrfdFaceDetectorService` collapsed all 9 output tensors' batch-dimension detection into one shared flag, keeping only the last tensor's value** — harmless for the bundled model (all 9 tensors are `[1,N,C]`), but a custom SCRFD export (explicitly supported via `scrfdModelUrl`) with a mix of batched/unbatched output tensors would silently corrupt decoding for whichever tensors didn't match the last one's shape. Fixed by tracking each output tensor's batch-dim-ness independently and applying the correct one per score/bbox/kps buffer.
+- **The frame that completed the last liveness action could be silently excluded from frontal-frame identity bookkeeping** — a side effect of the 3.5.0 blink-latency fix, which moved `_engine.processFrame()` before the frontal-frame-tracking code. When that same frame finished the session, engine completion (which runs `_onEngineComplete()` synchronously up to its first `await`) could snapshot `_frontalFrames`/`_bestFrontalFrame` before this frame got a chance to update them. Fixed by reordering the frontal-frame-tracking block (which never itself awaits) ahead of the engine call — closes the race for the default `mlkit` backend entirely, without reintroducing the original blink-latency issue.
+
+## 3.5.0
+
+### New Features
+
+- **Example app: `faceDetectorBackend` toggle** — `LivenessConfig.faceDetectorBackend` (ML Kit / YOLOv8n-face) was previously only settable in code with no example-app UI, so it always silently used the `mlkit` default. Added a home-screen toggle (alongside the existing performance-mode toggle) so both backends can be compared live, applied to every Face ID preset.
+
+- **Example app: "Verify Face — Head Turn Only" preset** — demonstrates that `LivenessConfig.actions` fully controls the challenge set with zero SDK changes required: `FaceIdMode.verificationOnly` using only `[LivenessAction.turnLeft, LivenessAction.turnRight]`, no blink. A reminder that trimming which actions are *required* is an app-level config choice — see [Liveness Actions](#liveness-actions) — as opposed to removing detector code from the SDK itself, which would also weaken the anti-spoof/replay-detection signals that read eye/smile data independently of the requested action list (`AntiSpoofEngine`, `ReplayAnalyzer`, `FaceGeometryAnalyzer`).
+
+### Bug Fixes
+
+- **Blink/turn/smile actions slow or not registering with `faceDetectorBackend: yolov8`** — two compounding issues, both in `_processFrame()`:
+  1. `_engine.processFrame()` (the actual blink/turn/smile detection) ran *after* `await`ing YOLO detection for identity-eligible frames, instead of immediately after ML Kit detection. Fixed by moving it up, before any `await` in the rest of the function.
+  2. Even after (1), YOLO detection was still `await`ed inline — and `CameraService` holds its `_isProcessingFrame` guard for the *entire* `_processFrame()` call, so the next camera frame couldn't be accepted until YOLO's round-trip finished. This throttled overall frame throughput to YOLO's inference rate, which is still too slow to catch fast transitions like an eye-closed→open blink even though each individual frame's action detection was no longer delayed. Fixed by making YOLO detection fire-and-forget (`unawaited`, guarded by a new `_isYoloRunning` flag — same pattern already used for the TFLite/video-replay models), with the best-frontal/frontal-frame-collection bookkeeping moved into a `_recordFrontalFrame()` helper called either synchronously (ML Kit backend) or from YOLO's `.then()` callback once it resolves. Camera frame delivery, and therefore liveness-action detection, is no longer coupled to YOLO's latency at all.
+
+### Dependencies
+
+- **Widened outdated constraints** flagged by pub.dev's dependency-freshness check: `google_mlkit_face_detection` `^0.13.2` → `^0.14.0`, `google_mlkit_face_mesh_detection` `^0.4.2` → `^0.5.0`. No breaking API usage found in this codebase after the upgrade — `flutter analyze` clean on both the package and example app.
+  - Capped at these versions deliberately, not the latest (`0.15.1`/`0.6.1`): those require Dart SDK `^3.12.0`, which broke resolution for anyone on an older Flutter/Dart install (reported: Dart 3.10.4). `0.14.0`/`0.5.0` need only `>=3.8.0 <4.0.0`, matching this package's own broad `sdk: ">=3.0.0 <4.0.0"` declaration. Revisit once `^3.12.0` is a safe minimum to require.
+  - **`permission_handler` deliberately left at `^12.0.1`** (not bumped to `^13.0.1`): the newer version pulls in `permission_handler_android 14.0.0`, whose `build.gradle.kts` uses a Kotlin Gradle Plugin 2.0+-only DSL (`compilerOptions { jvmTarget = ... }`) that failed to compile against this project's configured Kotlin toolchain (reported: `Unresolved reference: compilerOptions`). Revisit once the project's Kotlin/AGP versions are updated to match.
+
+## 3.4.0
+
+### New Features
+
+- **`LivenessConfig.faceDetectorPerformanceMode`** — ML Kit precision/speed trade-off is now configurable (was hardcoded). Default switched from `FaceDetectorMode.fast` to `.accurate`, which improves face tracking through moderate off-angle head positions (turn-left/right, look-up/down), where `.fast` was more prone to losing the face mid-turn before an action registered — set it back to `.fast` for lower per-frame latency if your target devices need it. Trade-off not yet re-benchmarked (see README Performance table). Does not extend ML Kit's fundamental angle ceiling; very steep/near-profile angles can still lose tracking either way. `FaceDetectorMode` is now exported from the package. Demoed in the example app via a new toggle on the home screen.
+
+- **`LivenessConfig.enableBestFrontalCapture`** — automatically captures the most-frontal frame seen during a session (by `|yaw|+|pitch|`) and exposes it as `LivenessResult.bestFrontalImageBytes` (upright JPEG) on success, for apps that want a human-viewable photo of the user alongside the liveness/identity result (e.g. a KYC review screen) without a separate capture step. Independent of `enableFaceId` — shares the same internal frame-tracking at no extra cost when both are on, but works standalone. JPEG quality configurable via `bestFrontalJpegQuality` (default `85`).
+  - `encodeFrameToJpeg()` (`lib/src/ml/frame_encoder.dart`) — converts the raw NV21/BGRA frame to an upright JPEG (rotation-corrected via `LivenessConfig`'s existing sensor-orientation handling), reusing `FacePreprocessor.yuv2rgbNv21` rather than a third copy of the YUV conversion. Runs on a background isolate (`Isolate.run`) so a full-resolution encode never blocks the UI thread.
+
+### Bug Fixes
+
+- **Swift Package Manager build failure** — `ios/flutter_face_liveness/Package.swift` exported its library product as `flutter_face_liveness` (underscore). Flutter's auto-generated `FlutterGeneratedPluginSwiftPackage` requires plugin product names to be hyphenated (`flutter-face-liveness`) per the [Flutter SPM naming convention](https://docs.flutter.dev/packages-and-plugins/swift-package-manager/for-app-developers), so any app built with `flutter config --enable-swift-package-manager` failed with `product 'flutter-face-liveness' ... not found`. Fixed by renaming the library product (target name unchanged).
+
+- **`ConcurrentModificationError` on `_frontalFrames` in release builds** — when `enableFaceId: true`, `_onEngineComplete()` iterates `_frontalFrames` with a `for` loop that awaits per-frame embedding computation. Because `_processFrame()` had no guard against the engine already being complete, a camera frame arriving during that async window could still append to the same list mid-iteration, throwing `Concurrent modification during iteration`. Fixed by (1) short-circuiting `_processFrame()` once `_engine.isComplete` is true, and (2) iterating a `List.of(_frontalFrames)` snapshot as defense in depth.
+
+## 3.3.0
+
+### New Features
+
+- **YOLOv8n-face detection backend for face identity** — `FaceDetectorBackend` (`mlkit` default, `yolov8`) lets the identity/embedding pipeline use a YOLOv8n-face TFLite model instead of ML Kit's own landmarks for the face box + eye keypoints fed into `FaceEmbeddingModel`. Liveness actions (blink/smile/head-pose) always use ML Kit regardless of this setting, since only ML Kit exposes that classification output. Configured via `LivenessConfig.faceDetectorBackend`, `yoloModelUrl`, `yoloConfidenceThreshold`, `yoloIouThreshold`.
+  - `YoloFaceDetectorService` / `YoloFaceDetection` — TFLite inference + letterbox preprocessing + NMS decode (standard Ultralytics raw pose-export layout: box + confidence + 5 keypoints).
+  - `YoloModelDownloader` — same cache-on-first-use pattern as `FaceModelDownloader`/`TFLiteModelDownloader`.
+  - `YoloModelDownloader.bundledModelUrl` already points to a hosted `yolov8n-face.tflite` release asset — works out of the box, no setup required. Override `LivenessConfig.yoloModelUrl` only if you want to swap in a custom model.
+
+- **`FaceCaptureService`** — enrollment/verification from a single captured photo (as opposed to a full live liveness session): decode → detect (either backend) → pre-capture quality gate (brightness/blur/face-size, distinct from `FaceIdentityService`'s post-hoc embedding-quality check) → eye-aligned crop → embed → match/register, reusing `FaceIdentityService`'s gallery so a person registered via live session or via photo capture is the same lookup. Returns `FaceCaptureResult` (either a `FaceMatchResult` or a pre-match rejection reason).
+  - `FaceEmbeddingModel`/`FacePreprocessor` gained a static-RGB entry point (`FacePreprocessor.prepareFromRgb`, `FaceIdentityService.computeEmbeddingFromRgb`) so the same loaded model/gallery serve both the live-frame and captured-photo paths — no duplicate model instance.
+
+- **`image` package** now a direct dependency (decoding captured photos for `FaceCaptureService`).
+
 ## 3.2.0
 
 ### New Features

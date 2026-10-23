@@ -65,7 +65,10 @@ class FaceDetectorService {
   int  _frameCount  = 0;
   FaceMeshData? _lastMeshData;
 
-  FaceDetectorService({bool enableFaceMesh = false}) {
+  FaceDetectorService({
+    bool enableFaceMesh = false,
+    FaceDetectorMode performanceMode = FaceDetectorMode.accurate,
+  }) {
     _detector = FaceDetector(
       options: FaceDetectorOptions(
         enableClassification: true,
@@ -73,7 +76,9 @@ class FaceDetectorService {
         enableLandmarks: true,  // needed for eye/nose positions in FaceGeometryAnalyzer
         enableContours: false,
         minFaceSize: 0.15,
-        performanceMode: FaceDetectorMode.fast,
+        // .accurate (default) trades some latency for better tracking through
+        // moderate off-angle head positions — see LivenessConfig.faceDetectorPerformanceMode.
+        performanceMode: performanceMode,
       ),
     );
     if (enableFaceMesh) {
@@ -84,8 +89,9 @@ class FaceDetectorService {
 
   /// Process one camera frame.
   ///
-  /// Set [captureRawFrame] to `true` (when FaceId is enabled) to attach the
-  /// NV21 bytes to the result so the identity service can run the embedding.
+  /// Set [captureRawFrame] to `true` to attach the raw NV21/BGRA bytes to the
+  /// result — needed by Face ID (embedding), TFLite anti-spoof, video-replay
+  /// detection, and best-frontal capture, any of which may request it.
   ///
   /// Returns an empty result on error or after dispose.
   Future<FaceDetectionResult> processCameraImage(

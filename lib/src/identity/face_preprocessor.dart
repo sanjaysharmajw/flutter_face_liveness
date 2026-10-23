@@ -43,6 +43,16 @@ class FacePreprocessor {
     double? leftEyeY,
     double? rightEyeX,
     double? rightEyeY,
+    // True when [bbox]/eye coordinates were produced by a detector that
+    // already samples the raw NV21 buffer directly (e.g. YoloFaceDetectorService),
+    // as opposed to ML Kit, which is handed a `rotation` and returns
+    // coordinates in the resulting *rotated display space*. The Android
+    // branch below un-rotates ML Kit's coordinates back to sensor space to
+    // match the raw buffer it crops from — that un-rotation must be skipped
+    // when the coordinates are already in sensor space, or the crop samples
+    // the wrong region entirely. No-op on iOS (never rotates either detector's
+    // output — see the iOS branch below).
+    bool coordinatesInSensorSpace = false,
   }) {
     try {
       final hasEyes = leftEyeX != null && leftEyeY != null &&
@@ -60,21 +70,86 @@ class FacePreprocessor {
         return _fromBgra(imageBytes, imageWidth, imageHeight, bbox);
       }
 
-      // Android: NV21, ML Kit landmarks are in rotated display space.
+      // Android: NV21, ML Kit landmarks are in rotated display space —
+      // effectiveOrientation=0 (identity transform, see _landmarkToSensor/
+      // _bboxToOriginal's `default:` case) when the caller already supplied
+      // sensor-space coordinates.
+      final effectiveOrientation = coordinatesInSensorSpace ? 0 : sensorOrientation;
       if (hasEyes) {
-        final le = _landmarkToSensor(leftEyeX, leftEyeY, imageWidth, imageHeight, sensorOrientation);
-        final re = _landmarkToSensor(rightEyeX, rightEyeY, imageWidth, imageHeight, sensorOrientation);
+        final le = _landmarkToSensor(leftEyeX, leftEyeY, imageWidth, imageHeight, effectiveOrientation);
+        final re = _landmarkToSensor(rightEyeX, rightEyeY, imageWidth, imageHeight, effectiveOrientation);
         final aligned = _alignedCropNv21(
           imageBytes, imageWidth, imageHeight,
           le.$1, le.$2, re.$1, re.$2,
         );
         if (aligned != null) return aligned;
       }
-      return _fromNv21(imageBytes, imageWidth, imageHeight, bbox, sensorOrientation);
+      return _fromNv21(imageBytes, imageWidth, imageHeight, bbox, effectiveOrientation);
     } catch (e) {
       debugPrint('[FacePreprocessor] $e');
       return null;
     }
+  }
+
+  /// Entry point for a static, already-decoded RGB image — e.g. a JPEG
+  /// captured via `FaceCaptureService` (decoded with `package:image`), as
+  /// opposed to [prepare]'s raw NV21/BGRA camera-frame bytes.
+  ///
+  /// Reuses the same eye-aligned similarity-transform + bilinear-resample
+  /// core as the live-camera path (via [_alignedCrop]) so embeddings are
+  /// directly comparable between the two capture routes.
+  ///
+  /// [samplePixel] returns `(r, g, b)` for a source pixel — supply this from
+  /// whatever RGB image representation the caller decoded.
+  static Float32List? prepareFromRgb({
+    required int width,
+    required int height,
+    required Rect bbox,
+    required List<int> Function(int x, int y) samplePixel,
+    double? leftEyeX,
+    double? leftEyeY,
+    double? rightEyeX,
+    double? rightEyeY,
+  }) {
+    try {
+      final hasEyes = leftEyeX != null && leftEyeY != null &&
+                      rightEyeX != null && rightEyeY != null;
+      if (hasEyes) {
+        final aligned = _alignedCrop(
+          Uint8List(0), width, height,
+          leftEyeX, leftEyeY, rightEyeX, rightEyeY,
+          samplePixel,
+        );
+        if (aligned != null) return aligned;
+      }
+      final crop = _padBbox(bbox, width.toDouble(), height.toDouble());
+      return _resampleRgb(width, height, crop, samplePixel);
+    } catch (e) {
+      debugPrint('[FacePreprocessor] prepareFromRgb: $e');
+      return null;
+    }
+  }
+
+  static Float32List _resampleRgb(
+    int w, int h, Rect crop, List<int> Function(int x, int y) samplePixel,
+  ) {
+    final out = Float32List(targetSize * targetSize * 3);
+    int i = 0;
+    final x0 = crop.left.toInt().clamp(0, w - 1);
+    final y0 = crop.top.toInt().clamp(0, h - 1);
+    final cw = crop.width.toInt().clamp(1, w - x0);
+    final ch = crop.height.toInt().clamp(1, h - y0);
+    for (int dy = 0; dy < targetSize; dy++) {
+      for (int dx = 0; dx < targetSize; dx++) {
+        final sx = (x0 + dx * cw ~/ targetSize).clamp(0, w - 1);
+        final sy = (y0 + dy * ch ~/ targetSize).clamp(0, h - 1);
+        final rgb = samplePixel(sx, sy);
+        out[i++] = (rgb[0] / 128.0) - 1.0;
+        out[i++] = (rgb[1] / 128.0) - 1.0;
+        out[i++] = (rgb[2] / 128.0) - 1.0;
+      }
+    }
+    return out;
   }
 
   // ── Eye-aligned crop (iOS / BGRA) ─────────────────────────────────────────
@@ -100,7 +175,7 @@ class FacePreprocessor {
   ) {
     return _alignedCrop(
       nv21, w, h, lex, ley, rex, rey,
-      (sx, sy) => _yuv2rgb(nv21, sx, sy, w, h),
+      (sx, sy) => yuv2rgbNv21(nv21, sx, sy, w, h),
     );
   }
 
@@ -224,7 +299,7 @@ class FacePreprocessor {
       for (int dx = 0; dx < targetSize; dx++) {
         final sx = (x0 + dx * cw ~/ targetSize).clamp(0, origW - 1);
         final sy = (y0 + dy * ch ~/ targetSize).clamp(0, origH - 1);
-        final rgb = _yuv2rgb(nv21, sx, sy, origW, origH);
+        final rgb = yuv2rgbNv21(nv21, sx, sy, origW, origH);
         out[i++] = (rgb[0] / 128.0) - 1.0;
         out[i++] = (rgb[1] / 128.0) - 1.0;
         out[i++] = (rgb[2] / 128.0) - 1.0;
@@ -263,7 +338,10 @@ class FacePreprocessor {
     );
   }
 
-  static List<int> _yuv2rgb(Uint8List nv21, int x, int y, int w, int h) {
+  /// BT.601 NV21→RGB conversion for a single pixel. Public so other NV21
+  /// consumers (e.g. [YoloFaceDetectorService]) share this instead of a
+  /// second copy of the same coefficients.
+  static List<int> yuv2rgbNv21(Uint8List nv21, int x, int y, int w, int h) {
     final yVal   = nv21[y * w + x] & 0xFF;
     final uvBase = w * h + (y >> 1) * w + (x & ~1);
     final vVal   = nv21[uvBase    ] & 0xFF;

@@ -1,7 +1,9 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart' show FaceDetectorMode;
 
 import '../identity/face_identity_service.dart' show FaceIdMode;
+import 'face_detector_backend.dart';
 
 /// Full configuration for the liveness verification session.
 ///
@@ -10,12 +12,13 @@ import '../identity/face_identity_service.dart' show FaceIdMode;
 class LivenessConfig {
   const LivenessConfig({
     // ── Session ─────────────────────────────────────────────────────────
-    this.sessionTimeoutMs = 60000,
+    this.sessionTimeoutMs = 90000,
     this.randomizeActions = true,
 
     // ── Camera ───────────────────────────────────────────────────────────
     this.cameraResolution = ResolutionPreset.high,
     this.targetFps = 20,
+    this.faceDetectorPerformanceMode = FaceDetectorMode.accurate,
 
     // ── Anti-spoof ───────────────────────────────────────────────────────
     this.enableAntiSpoof = true,
@@ -24,8 +27,8 @@ class LivenessConfig {
     // ── Frame quality ────────────────────────────────────────────────────
     this.enableBrightnessCheck = true,
     this.enableBlurDetection = true,
-    this.brightnessMin = 0.12,
-    this.brightnessMax = 0.92,
+    this.brightnessMin = 0.08,
+    this.brightnessMax = 0.95,
     this.blurThreshold = 80.0,
 
     // ── TFLite (optional) ────────────────────────────────────────────────
@@ -58,6 +61,17 @@ class LivenessConfig {
     this.faceIdSimilarityThreshold = 0.82,
     this.registrationDuplicateThreshold = 0.75,
     this.minEmbeddingQuality = 0.50,
+    this.faceDetectorBackend = FaceDetectorBackend.mlkit,
+    this.yoloModelUrl,
+    this.yoloConfidenceThreshold = 0.4,
+    this.yoloIouThreshold = 0.45,
+    this.scrfdModelUrl,
+    this.scrfdConfidenceThreshold = 0.4,
+    this.scrfdIouThreshold = 0.45,
+
+    // ── Best-frontal capture ────────────────────────────────────────────
+    this.enableBestFrontalCapture = false,
+    this.bestFrontalJpegQuality = 85,
 
     // ── UI ───────────────────────────────────────────────────────────────
     this.themeMode = ThemeMode.dark,
@@ -76,6 +90,16 @@ class LivenessConfig {
 
   /// Target frame processing rate (1–30). Higher = more responsive but more CPU.
   final int targetFps;
+
+  /// ML Kit face detector precision/speed trade-off.
+  ///
+  /// [FaceDetectorMode.accurate] (default) trades some per-frame latency for
+  /// better tracking through moderate off-angle head positions — turn-left/
+  /// right and look-up/down actions are less likely to lose the face mid-turn.
+  /// [FaceDetectorMode.fast] is lower-latency but more prone to losing
+  /// tracking at the same angles. Neither changes ML Kit's fundamental angle
+  /// ceiling — very steep/near-profile angles can still lose tracking either way.
+  final FaceDetectorMode faceDetectorPerformanceMode;
 
   // ── Anti-spoof ───────────────────────────────────────────────────────────
   /// Enable heuristic + ML-based anti-spoof validation.
@@ -175,6 +199,44 @@ class LivenessConfig {
   /// low-light, motion blur, or partial face crops.
   final double minEmbeddingQuality;
 
+  /// Which detector supplies the face box + eye positions fed into the
+  /// identity/embedding pipeline. Liveness actions always use ML Kit
+  /// regardless of this setting (see [FaceDetectorBackend]).
+  final FaceDetectorBackend faceDetectorBackend;
+
+  /// Override URL for the YOLOv8n-face TFLite model. Falls back to
+  /// [YoloModelDownloader.bundledModelUrl] when null.
+  final String? yoloModelUrl;
+
+  /// Minimum detection confidence for a YOLOv8n-face box to be kept.
+  final double yoloConfidenceThreshold;
+
+  /// IoU threshold for YOLOv8n-face non-max suppression.
+  final double yoloIouThreshold;
+
+  /// Override URL for the SCRFD-2.5G-KPS TFLite model. Falls back to
+  /// [ScrfdModelDownloader.bundledModelUrl] when null.
+  final String? scrfdModelUrl;
+
+  /// Minimum detection confidence for a SCRFD-2.5G-KPS box to be kept.
+  final double scrfdConfidenceThreshold;
+
+  /// IoU threshold for SCRFD-2.5G-KPS non-max suppression.
+  final double scrfdIouThreshold;
+
+  /// When true, tracks the most-frontal frame seen during the session (by
+  /// |yaw|+|pitch|) and exposes it as [LivenessResult.bestFrontalImageBytes]
+  /// (upright JPEG) on completion — a human-viewable capture (e.g. for a KYC
+  /// review screen) alongside the numeric liveness/identity results.
+  ///
+  /// Independent of [enableFaceId] — the same underlying frame tracking is
+  /// shared internally when both are on, at no extra cost, but this works
+  /// standalone without identity/embedding matching.
+  final bool enableBestFrontalCapture;
+
+  /// JPEG quality (0–100) for [LivenessResult.bestFrontalImageBytes].
+  final int bestFrontalJpegQuality;
+
   // ── UI ────────────────────────────────────────────────────────────────────
   final ThemeMode themeMode;
   final bool showDebugOverlay;
@@ -192,6 +254,7 @@ class LivenessConfig {
     bool? randomizeActions,
     ResolutionPreset? cameraResolution,
     int? targetFps,
+    FaceDetectorMode? faceDetectorPerformanceMode,
     bool? enableAntiSpoof,
     double? antiSpoofThreshold,
     bool? enableBrightnessCheck,
@@ -219,6 +282,15 @@ class LivenessConfig {
     double? faceIdSimilarityThreshold,
     double? registrationDuplicateThreshold,
     double? minEmbeddingQuality,
+    FaceDetectorBackend? faceDetectorBackend,
+    String? yoloModelUrl,
+    double? yoloConfidenceThreshold,
+    double? yoloIouThreshold,
+    String? scrfdModelUrl,
+    double? scrfdConfidenceThreshold,
+    double? scrfdIouThreshold,
+    bool? enableBestFrontalCapture,
+    int? bestFrontalJpegQuality,
     ThemeMode? themeMode,
     bool? showDebugOverlay,
   }) {
@@ -227,6 +299,7 @@ class LivenessConfig {
       randomizeActions: randomizeActions ?? this.randomizeActions,
       cameraResolution: cameraResolution ?? this.cameraResolution,
       targetFps: targetFps ?? this.targetFps,
+      faceDetectorPerformanceMode: faceDetectorPerformanceMode ?? this.faceDetectorPerformanceMode,
       enableAntiSpoof: enableAntiSpoof ?? this.enableAntiSpoof,
       antiSpoofThreshold: antiSpoofThreshold ?? this.antiSpoofThreshold,
       enableBrightnessCheck: enableBrightnessCheck ?? this.enableBrightnessCheck,
@@ -257,6 +330,15 @@ class LivenessConfig {
       registrationDuplicateThreshold:
           registrationDuplicateThreshold ?? this.registrationDuplicateThreshold,
       minEmbeddingQuality: minEmbeddingQuality ?? this.minEmbeddingQuality,
+      faceDetectorBackend: faceDetectorBackend ?? this.faceDetectorBackend,
+      yoloModelUrl: yoloModelUrl ?? this.yoloModelUrl,
+      yoloConfidenceThreshold: yoloConfidenceThreshold ?? this.yoloConfidenceThreshold,
+      yoloIouThreshold: yoloIouThreshold ?? this.yoloIouThreshold,
+      scrfdModelUrl: scrfdModelUrl ?? this.scrfdModelUrl,
+      scrfdConfidenceThreshold: scrfdConfidenceThreshold ?? this.scrfdConfidenceThreshold,
+      scrfdIouThreshold: scrfdIouThreshold ?? this.scrfdIouThreshold,
+      enableBestFrontalCapture: enableBestFrontalCapture ?? this.enableBestFrontalCapture,
+      bestFrontalJpegQuality: bestFrontalJpegQuality ?? this.bestFrontalJpegQuality,
       themeMode: themeMode ?? this.themeMode,
       showDebugOverlay: showDebugOverlay ?? this.showDebugOverlay,
     );

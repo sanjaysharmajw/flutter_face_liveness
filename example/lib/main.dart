@@ -64,6 +64,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   List<String> _registeredFaceIds = [];
 
+  // ML Kit performanceMode toggle — see LivenessConfig.faceDetectorPerformanceMode.
+  // Accurate (default) trades some latency for better off-angle face tracking.
+  bool _accurateDetection = true;
+  FaceDetectorMode get _performanceMode =>
+      _accurateDetection ? FaceDetectorMode.accurate : FaceDetectorMode.fast;
+
+  // Identity-pipeline detector backend toggle — see LivenessConfig.faceDetectorBackend.
+  // Only affects the Face ID/identity embedding pipeline; liveness actions
+  // (blink/smile/turn) always use ML Kit regardless of this setting.
+  FaceDetectorBackend _detectorBackend = FaceDetectorBackend.mlkit;
+
   @override
   void initState() {
     super.initState();
@@ -133,7 +144,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     height: 1.6,
                   ),
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 28),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _PerformanceModeToggle(
+                    accurate: _accurateDetection,
+                    onChanged: (v) => setState(() => _accurateDetection = v),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _DetectorBackendToggle(
+                    backend: _detectorBackend,
+                    onChanged: (v) => setState(() => _detectorBackend = v),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Column(
@@ -201,11 +228,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                       const SizedBox(height: 14),
                       _ChallengeCard(
+                        icon: Icons.swap_horiz_rounded,
+                        title: 'Verify Face — Head Turn Only',
+                        subtitle: 'Login-only · Turn Left + Turn Right, no blink',
+                        accentColor: _purple,
+                        onTap: () => _launchVerifyFaceHeadTurn(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.person_outline_rounded,
+                        title: 'Register Face — No Actions',
+                        subtitle: 'One-time enrolment · Just hold still, no challenge',
+                        accentColor: _cyan,
+                        onTap: () => _launchRegisterFaceNoActions(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.badge_outlined,
+                        title: 'Verify Face — No Actions',
+                        subtitle: 'Login-only · Just hold still, no challenge',
+                        accentColor: _purple,
+                        onTap: () => _launchVerifyFaceNoActions(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
                         icon: Icons.psychology_outlined,
                         title: 'With TFLite Anti-Spoof',
                         subtitle: 'TFLite anti-spoof + video replay detection',
                         accentColor: _error,
                         onTap: () => _launchWithTFLite(context),
+                      ),
+                      const SizedBox(height: 14),
+                      _ChallengeCard(
+                        icon: Icons.photo_camera_front_rounded,
+                        title: 'Best-Frontal Capture',
+                        subtitle: 'Auto-captures an upright photo on success',
+                        accentColor: _cyan,
+                        onTap: () => _launchBestFrontalCapture(context),
                       ),
                     ],
                   ),
@@ -256,7 +315,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(LivenessScreen(actions: actions)));
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: actions,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
   }
 
   Future<void> _launchWithTFLite(BuildContext ctx) async {
@@ -266,10 +329,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableTFLite: true,
       enableVideoReplay: true,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
   }
 
@@ -280,10 +345,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
       faceIdMode: FaceIdMode.auto,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
     if (mounted) await _loadFaceIds();
   }
@@ -295,10 +362,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
       faceIdMode: FaceIdMode.registrationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
     if (mounted) await _loadFaceIds();
   }
@@ -310,10 +379,87 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _showPermissionSheet(ctx);
       return;
     }
-    await Navigator.of(ctx).push(_fade(const LivenessScreen(
-      actions: [LivenessAction.blink, LivenessAction.turnLeft],
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
       enableFaceId: true,
       faceIdMode: FaceIdMode.verificationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
+  }
+
+  /// Same as [_launchVerifyFace] (login-only, never registers unknown faces)
+  /// but with only the two head-turn actions as the challenge — no blink.
+  Future<void> _launchVerifyFaceHeadTurn(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.turnLeft, LivenessAction.turnRight],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.verificationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
+  }
+
+  /// Same as [_launchRegisterFace] but with an empty action list — no
+  /// blink/turn/look/smile/mouth challenge at all. The session completes
+  /// as soon as a stable, quality-passed, anti-spoof-passed frontal face is
+  /// held for a short debounced window (see LivenessEngine's passive-mode
+  /// handling of `actions: const []`), instead of waiting for an active
+  /// gesture. Still gated by the same anti-spoof heuristics as every other
+  /// preset — this removes the *challenge*, not the liveness checks.
+  Future<void> _launchRegisterFaceNoActions(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.registrationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
+    if (mounted) await _loadFaceIds();
+  }
+
+  /// Same as [_launchVerifyFace] but with an empty action list — see
+  /// [_launchRegisterFaceNoActions] for what "no actions" means here.
+  Future<void> _launchVerifyFaceNoActions(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [],
+      enableFaceId: true,
+      faceIdMode: FaceIdMode.verificationOnly,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
+    )));
+  }
+
+  Future<void> _launchBestFrontalCapture(BuildContext ctx) async {
+    final status = await Permission.camera.request();
+    if (!ctx.mounted) return;
+    if (status.isDenied || status.isPermanentlyDenied) {
+      _showPermissionSheet(ctx);
+      return;
+    }
+    await Navigator.of(ctx).push(_fade(LivenessScreen(
+      actions: const [LivenessAction.blink, LivenessAction.turnLeft],
+      enableBestFrontalCapture: true,
+      performanceMode: _performanceMode,
+      detectorBackend: _detectorBackend,
     )));
   }
 
@@ -392,12 +538,18 @@ class LivenessScreen extends StatelessWidget {
     this.faceIdMode = FaceIdMode.auto,
     this.enableTFLite = true,
     this.enableVideoReplay = false,
+    this.enableBestFrontalCapture = false,
+    this.performanceMode = FaceDetectorMode.accurate,
+    this.detectorBackend = FaceDetectorBackend.mlkit,
   });
   final List<LivenessAction> actions;
   final bool enableFaceId;
   final FaceIdMode faceIdMode;
   final bool enableTFLite;
   final bool enableVideoReplay;
+  final bool enableBestFrontalCapture;
+  final FaceDetectorMode performanceMode;
+  final FaceDetectorBackend detectorBackend;
 
   @override
   Widget build(BuildContext context) {
@@ -405,6 +557,8 @@ class LivenessScreen extends StatelessWidget {
       actions: actions,
       config: LivenessConfig(
         randomizeActions: true,
+        faceDetectorPerformanceMode: performanceMode,
+        faceDetectorBackend: detectorBackend,
         enableAntiSpoof: true,
         enableBrightnessCheck: true,
         enableDuplicateFrameDetection: true,
@@ -412,8 +566,10 @@ class LivenessScreen extends StatelessWidget {
         enableBlurDetection: true,
         enableFaceId: enableFaceId,
         faceIdMode: faceIdMode,
+        // SDK default (0.82) — no override.
         enableTFLite: enableTFLite,
         enableVideoReplayDetection: enableVideoReplay,
+        enableBestFrontalCapture: enableBestFrontalCapture,
         showDebugOverlay: true,
       ),
       onSuccess: (result) => Navigator.of(context).pushReplacement(
@@ -520,6 +676,12 @@ class _ResultScreenState extends State<ResultScreen>
                                   : FontWeight.w600,
                             ),
                           ),
+                          if (widget.result?.bestFrontalImageBytes != null) ...[
+                            const SizedBox(height: 24),
+                            _BestFrontalPreview(
+                              bytes: widget.result!.bestFrontalImageBytes!,
+                            ),
+                          ],
                           if (widget.result != null) ...[
                             const SizedBox(height: 28),
                             _StatsCard(result: widget.result!),
@@ -570,6 +732,29 @@ class _ResultBadge extends StatelessWidget {
         success ? Icons.verified_rounded : Icons.cancel_rounded,
         color: color,
         size: 62,
+      ),
+    );
+  }
+}
+
+class _BestFrontalPreview extends StatelessWidget {
+  const _BestFrontalPreview({required this.bytes});
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 140,
+      height: 140,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: _success.withValues(alpha: 0.4), width: 2),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 16, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: ClipOval(
+        child: Image.memory(bytes, fit: BoxFit.cover),
       ),
     );
   }
@@ -895,6 +1080,183 @@ class _StatTile extends StatelessWidget {
 // ─────────────────────────────────────────────
 // Shared Widgets
 // ─────────────────────────────────────────────
+
+/// Toggle for `LivenessConfig.faceDetectorPerformanceMode` — demonstrates
+/// the accurate/fast trade-off documented in the README's Liveness Actions
+/// and Performance sections. Applies to every preset launched below.
+class _PerformanceModeToggle extends StatelessWidget {
+  const _PerformanceModeToggle({required this.accurate, required this.onChanged});
+  final bool accurate;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            accurate ? Icons.gps_fixed_rounded : Icons.speed_rounded,
+            size: 18,
+            color: accurate ? _success : _cyan,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  accurate ? 'Accurate Detection' : 'Fast Detection',
+                  style: const TextStyle(
+                    color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  accurate
+                      ? 'Better off-angle tracking, slightly higher latency'
+                      : 'Lower latency, may lose tracking on turns sooner',
+                  style: const TextStyle(color: _textSecondary, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: accurate,
+            onChanged: onChanged,
+            activeTrackColor: _success,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Toggle for `LivenessConfig.faceDetectorBackend` — demonstrates the ML Kit
+/// / YOLOv8n-face choice for the identity/embedding pipeline. Only relevant
+/// when Face ID is enabled; liveness actions always use ML Kit either way.
+class _DetectorBackendToggle extends StatelessWidget {
+  const _DetectorBackendToggle({required this.backend, required this.onChanged});
+  final FaceDetectorBackend backend;
+  final ValueChanged<FaceDetectorBackend> onChanged;
+
+  static const _labels = {
+    FaceDetectorBackend.mlkit:  'ML Kit',
+    FaceDetectorBackend.yolov8: 'YOLOv8',
+    FaceDetectorBackend.scrfd:  'SCRFD',
+  };
+  static const _icons = {
+    FaceDetectorBackend.mlkit:  Icons.face_retouching_natural_rounded,
+    FaceDetectorBackend.yolov8: Icons.blur_on_rounded,
+    FaceDetectorBackend.scrfd:  Icons.grain_rounded,
+  };
+  static const _subtitles = {
+    FaceDetectorBackend.mlkit:
+        'Default — reuses ML Kit landmarks, no extra download',
+    FaceDetectorBackend.yolov8:
+        'Only affects Register/Verify Face presets below — downloads model on first use. No effect on Standard/Extended/TFLite presets.',
+    FaceDetectorBackend.scrfd:
+        'Only affects Register/Verify Face presets below — InsightFace anchor-based detector, downloads on first use. No effect on Standard/Extended/TFLite presets.',
+  };
+
+  Color get _accent => switch (backend) {
+        FaceDetectorBackend.mlkit  => _primary,
+        FaceDetectorBackend.yolov8 => _purple,
+        FaceDetectorBackend.scrfd  => const Color(0xFFEC7A3D),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(_icons[backend], size: 18, color: _accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${_labels[backend]} Backend',
+                  style: const TextStyle(
+                    color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _subtitles[backend]!,
+            style: const TextStyle(color: _textSecondary, fontSize: 11),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: FaceDetectorBackend.values.map((b) {
+              final selected = b == backend;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => onChanged(b),
+                  child: Container(
+                    margin: EdgeInsets.only(
+                        right: b != FaceDetectorBackend.values.last ? 8 : 0),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: selected ? _accent.withValues(alpha: 0.14) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: selected
+                            ? _accent.withValues(alpha: 0.5)
+                            : Colors.black.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Text(
+                      _labels[b]!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: selected ? _accent : _textSecondary,
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline_rounded, size: 13, color: Colors.amber),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Register and verify with the SAME backend — switching it in '
+                  'between can make a real match fail, since each detector '
+                  'computes eye-alignment slightly differently.',
+                  style: TextStyle(
+                    color: _textSecondary.withValues(alpha: 0.9),
+                    fontSize: 10.5,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _ChallengeCard extends StatefulWidget {
   const _ChallengeCard({

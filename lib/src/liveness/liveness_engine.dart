@@ -45,6 +45,7 @@ class LivenessEngine extends ChangeNotifier {
 
   int _consecutiveNoFaceFrames    = 0;
   int _consecutiveBadLightFrames  = 0;
+  int _consecutivePassiveFrames   = 0;
   double _lastConfidenceScore     = 0.0;
   bool _isComplete                = false;
 
@@ -52,6 +53,12 @@ class LivenessEngine extends ChangeNotifier {
   // Camera auto-exposure needs ~5 frames to settle on startup.
   // Only report low/over light after this many consecutive bad-quality frames.
   static const int _badLightFrameLimit = 6;
+  // With zero required actions (see [_buildActionSequence]/passive mode
+  // below), this many consecutive quality+anti-spoof-passed frames complete
+  // the session — debounced rather than instant so a single lucky frame
+  // doesn't fire early, and so LivenessController's frontal-frame collection
+  // gets a few frames to average for Face ID before the session ends.
+  static const int _passiveCompletionFrameCount = 10;
 
   final void Function(LivenessAction action)?   onActionCompleted;
   final void Function(LivenessResult result)?   onAllActionsCompleted;
@@ -150,7 +157,22 @@ class LivenessEngine extends ChangeNotifier {
 
     // ── Active liveness challenge ──────────────────────────────────────────
     final action = currentAction;
-    if (action == null) return;
+    if (action == null) {
+      // No required actions configured (LivenessConfig actions: const []) —
+      // passive mode: a short debounced run of consecutive quality- and
+      // anti-spoof-passed frames completes the session instead of requiring
+      // an active challenge. Reachable only when _sequence was empty from
+      // the start — any normal "all actions completed" path already sets
+      // _isComplete = true in _processAction() before processFrame() could
+      // reach this line again (see the early `if (_isComplete) return;`).
+      _consecutivePassiveFrames++;
+      if (_consecutivePassiveFrames >= _passiveCompletionFrameCount) {
+        _complete();
+      } else {
+        _setStatus(DetectionStatus.ready);
+      }
+      return;
+    }
 
     _setStatus(DetectionStatus.actionInProgress);
     _processAction(action, face, meshData: meshData);
@@ -304,6 +326,7 @@ class LivenessEngine extends ChangeNotifier {
     _isComplete = false;
     _consecutiveNoFaceFrames   = 0;
     _consecutiveBadLightFrames = 0;
+    _consecutivePassiveFrames  = 0;
     _lastConfidenceScore = 0.0;
     _mouthBaseline.clear();
     _mouthOpenConsecutive = 0;

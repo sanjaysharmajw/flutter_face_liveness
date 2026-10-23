@@ -21,6 +21,7 @@ class LivenessResult {
     this.isFaceIdNew,
     this.faceAlreadyRegistered,
     this.faceMatchScore,
+    this.bestFrontalImageBytes,
   });
 
   /// Convenience constructor for a successful result.
@@ -109,6 +110,10 @@ class LivenessResult {
   /// Non-null when [enableFaceId] is true.
   final double? faceMatchScore;
 
+  /// Upright JPEG of the most-frontal frame seen during the session — only
+  /// populated when [LivenessConfig.enableBestFrontalCapture] is true.
+  final Uint8List? bestFrontalImageBytes;
+
   // ── Copy helpers ─────────────────────────────────────────────────────────
 
   LivenessResult withTfliteResult(double score, {required bool deepfakeDetected}) =>
@@ -132,6 +137,9 @@ class LivenessResult {
     faceMatchScore: matchScore,
   );
 
+  LivenessResult withBestFrontalImage(Uint8List bytes) =>
+      _copy(bestFrontalImageBytes: bytes);
+
   LivenessResult _copy({
     double? tfliteScore,
     bool? deepfakeDetected,
@@ -141,6 +149,7 @@ class LivenessResult {
     bool? isFaceIdNew,
     bool? faceAlreadyRegistered,
     double? faceMatchScore,
+    Uint8List? bestFrontalImageBytes,
   }) =>
       LivenessResult(
         isSuccess: isSuccess,
@@ -159,6 +168,7 @@ class LivenessResult {
         isFaceIdNew: isFaceIdNew ?? this.isFaceIdNew,
         faceAlreadyRegistered: faceAlreadyRegistered ?? this.faceAlreadyRegistered,
         faceMatchScore: faceMatchScore ?? this.faceMatchScore,
+        bestFrontalImageBytes: bestFrontalImageBytes ?? this.bestFrontalImageBytes,
       );
 
   @override
@@ -171,5 +181,6 @@ class LivenessResult {
       'faceId: $faceId, '
       'faceAlreadyRegistered: $faceAlreadyRegistered, '
       'faceMatchScore: ${faceMatchScore?.toStringAsFixed(3)}, '
+      'bestFrontalImageBytes: ${bestFrontalImageBytes?.length} bytes, '
       'actions: $completedActions)';
 }
