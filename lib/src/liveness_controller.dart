@@ -1,6 +1,5 @@
 import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
-import 'dart:isolate' show Isolate;
 import 'dart:math' show min;
 import 'dart:ui' show Rect, Offset;
 
@@ -996,9 +995,16 @@ class LivenessController extends ChangeNotifier {
     if (finalResult.isSuccess &&
         _config.enableBestFrontalCapture &&
         _bestFrontalFrame != null) {
-      final frame   = _bestFrontalFrame!;
-      final quality = _config.bestFrontalJpegQuality;
-      final jpeg = await Isolate.run(() => encodeFrameToJpeg(frame, quality: quality));
+      // Best-effort: a capture failure must never prevent onSuccess firing.
+      Uint8List? jpeg;
+      try {
+        jpeg = await encodeFrameToJpegInBackground(
+          _bestFrontalFrame!,
+          quality: _config.bestFrontalJpegQuality,
+        );
+      } catch (e) {
+        debugPrint('[LivenessController] Best-frontal capture failed: $e');
+      }
       if (_isDisposed) return;
       if (jpeg != null) {
         finalResult = finalResult.withBestFrontalImage(jpeg);

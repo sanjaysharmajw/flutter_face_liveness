@@ -1,6 +1,6 @@
 # flutter_face_liveness
 
-[![pub version](https://img.shields.io/badge/pub-3.7.0-blue)](https://pub.dev/packages/flutter_face_liveness)
+[![pub version](https://img.shields.io/badge/pub-3.7.1-blue)](https://pub.dev/packages/flutter_face_liveness)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-green.svg)]()
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-☕-yellow)](https://buymeacoffee.com/sanjaysharmajw)
@@ -226,7 +226,7 @@ FlutterFaceLiveness(
 
 ```yaml
 dependencies:
-  flutter_face_liveness: ^3.7.0
+  flutter_face_liveness: ^3.7.1
 ```
 
 ### 2. Platform permissions
@@ -1055,7 +1055,9 @@ Two home-screen toggles apply to every preset:
 
 See [CHANGELOG.md](CHANGELOG.md) for full release history.
 
-Latest: **v3.7.0** — `actions: []` now works for a passive, no-challenge Face ID session (hold-still completion, still gated by every quality/anti-spoof check); two new example-app presets (Register/Verify Face — No Actions); widened `yoloConfidenceThreshold`/`scrfdConfidenceThreshold`, `brightnessMin`/`brightnessMax`, and `sessionTimeoutMs` defaults to reduce occasional missed detections.
+Latest: **v3.7.1** — Fixed `onSuccess`/`onFailed` never firing when `enableBestFrontalCapture: true`.
+
+Previous: **v3.7.0** — `actions: []` now works for a passive, no-challenge Face ID session (hold-still completion, still gated by every quality/anti-spoof check); two new example-app presets (Register/Verify Face — No Actions); widened `yoloConfidenceThreshold`/`scrfdConfidenceThreshold`, `brightnessMin`/`brightnessMax`, and `sessionTimeoutMs` defaults to reduce occasional missed detections.
 
 Previous: **v3.6.0** — Added `FaceDetectorBackend.scrfd` (InsightFace SCRFD-2.5G-KPS) as a third identity-pipeline detector option alongside `mlkit`/`yolov8`, a live on-screen badge confirming the selected backend is actually detecting, and fixed several bugs (coordinate-space, best-frontal JPEG rotation, download-progress display, an over-eager inference-dispatch regression).
 

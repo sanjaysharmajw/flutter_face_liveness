@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'dart:isolate' show Isolate;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -6,6 +7,17 @@ import 'package:image/image.dart' as img;
 
 import '../identity/face_preprocessor.dart';
 import 'face_detector_service.dart' show RawFrameData;
+
+/// Runs [encodeFrameToJpeg] on a background isolate.
+///
+/// Must stay a top-level function: a closure passed to [Isolate.run] from
+/// inside an instance method can capture `this` through the method's shared
+/// closure context, and sending the controller (camera, ML Kit, TFLite
+/// handles) to another isolate throws — which silently aborted session
+/// completion before onSuccess/onFailed could fire.
+Future<Uint8List?> encodeFrameToJpegInBackground(RawFrameData frame, {int quality = 85}) {
+  return Isolate.run(() => encodeFrameToJpeg(frame, quality: quality));
+}
 
 /// Converts a raw camera frame (NV21 on Android, BGRA8888 on iOS) into an
 /// upright JPEG — used to expose a human-viewable capture (e.g.

@@ -14,6 +14,19 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+// Some plugins (e.g. tflite_flutter) set Java compatibility but not Kotlin's
+// jvmTarget, so Kotlin falls back to the JDK version and the build fails JVM
+// target validation. Align Kotlin's target with each module's Java target.
+subprojects {
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        def javaTarget = project.extensions.findByName("android")?.compileOptions?.targetCompatibility
+        if (javaTarget != null) {
+            compilerOptions.jvmTarget.set(
+                org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(javaTarget.toString()))
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }

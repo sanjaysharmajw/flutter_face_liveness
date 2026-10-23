@@ -1,3 +1,17 @@
+## 3.7.1
+
+### Bug Fixes
+
+- **`onSuccess`/`onFailed` never fired when `enableBestFrontalCapture: true`** — the session reached "VERIFIED" on screen, but neither callback was ever called. The best-frontal JPEG was encoded with an inline `Isolate.run(() => ...)` closure inside `LivenessController._onEngineComplete`; because other closures in that method reference instance fields, the Dart VM captured `this` (the whole controller, including camera/ML Kit/TFLite handles) into the shared closure context, and sending it to the background isolate threw an "unsendable object" error. `_onEngineComplete` runs unawaited, so the error was silently swallowed before the callbacks. Encoding now goes through a top-level `encodeFrameToJpegInBackground()` helper that only sends the frame and quality, and the capture is best-effort — if encoding fails for any reason, `onSuccess` still fires (with `bestFrontalImageBytes` left `null`).
+  - Added `test/frame_encoder_test.dart` — reproduces the original failure and guards the fix.
+
+### Dependencies
+
+- `google_mlkit_face_detection` `^0.14.0` → `^0.15.1`
+- `google_mlkit_face_mesh_detection` `^0.5.0` → `^0.6.1`
+- Removed the unused `permission_handler` dependency — the package never imported it. Apps that request camera permission with it (as the example app does) should add it to their own `pubspec.yaml`.
+- Shortened the package description to fit pub.dev's 180-character limit.
+
 ## 3.7.0
 
 ### New Features
